@@ -6,9 +6,7 @@ pub struct Optimizer;
 
 impl Optimizer {
     pub fn optimize(plan: LogicalPlan, schema: &Schema) -> LogicalPlan {
-        let plan = Self::push_projection_into_scan(plan, schema);
-        let plan = Self::push_filter_into_scan(plan);
-        plan
+        Self::push_filter_into_scan(Self::push_projection_into_scan(plan, schema))
     }
 
     /// Push projections into Scan nodes so only needed columns are read.

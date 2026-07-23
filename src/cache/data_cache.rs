@@ -76,10 +76,10 @@ impl DataCache {
                 .map(|(k, _)| k.clone()),
         };
 
-        if let Some(k) = key {
-            if let Some(entry) = self.entries.remove(&k) {
-                self.current_size -= entry.chunk.meta.compressed_size as usize;
-            }
+        if let Some(k) = key
+            && let Some(entry) = self.entries.remove(&k)
+        {
+            self.current_size -= entry.chunk.meta.compressed_size as usize;
         }
     }
 

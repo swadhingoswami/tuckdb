@@ -125,7 +125,8 @@ impl BlobReader {
         }
 
         let num_cols = schema.fields.len();
-        let mut batch_map: BTreeMap<u32, Vec<(u32, &ChunkMeta, &[u8])>> = BTreeMap::new();
+        type ChunkGroup<'a> = Vec<(u32, &'a ChunkMeta, &'a [u8])>;
+        let mut batch_map: BTreeMap<u32, ChunkGroup> = BTreeMap::new();
 
         for meta in &chunks {
             let start = meta.offset as usize;
@@ -141,7 +142,7 @@ impl BlobReader {
         }
 
         let mut batches = Vec::new();
-        for (_, cols) in &batch_map {
+        for cols in batch_map.values() {
             let mut columns = Vec::with_capacity(num_cols);
             let mut sorted_cols = cols.clone();
             sorted_cols.sort_by_key(|(idx, _, _)| *idx);

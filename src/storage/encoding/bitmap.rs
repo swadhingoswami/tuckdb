@@ -39,14 +39,14 @@ impl Decoder for BitmapDecoder {
         }
         let (stored_count, mut pos) = decode_varint(bytes);
         assert_eq!(stored_count, count as u64, "BitmapDecoder: count mismatch");
-        let word_count = (count + 63) / 64;
+        let word_count = count.div_ceil(64);
         let mut values = Vec::with_capacity(count);
         for wi in 0..word_count {
             let mut word_bytes = [0u8; 8];
             word_bytes.copy_from_slice(&bytes[pos..pos + 8]);
             pos += 8;
             let word = u64::from_le_bytes(word_bytes);
-            let bits_in_word = if wi == word_count - 1 && count % 64 != 0 {
+            let bits_in_word = if wi == word_count - 1 && !count.is_multiple_of(64) {
                 count % 64
             } else {
                 64

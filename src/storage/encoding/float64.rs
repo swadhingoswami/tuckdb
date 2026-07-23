@@ -37,7 +37,7 @@ impl Encoder for XorEncoder {
                         } else {
                             (xor >> trailing) & ((1u64 << meaningful) - 1)
                         };
-                        let byte_count = ((meaningful + 7) / 8) as usize;
+                        let byte_count = meaningful.div_ceil(8) as usize;
                         buf.extend_from_slice(&mask.to_le_bytes()[..byte_count]);
                     }
                     prev = bits;
@@ -82,7 +82,7 @@ impl Decoder for XorDecoder {
             pos += 2;
             let meaningful = u16::from_le_bytes(bytes[pos..pos + 2].try_into().unwrap());
             pos += 2;
-            let byte_count = ((meaningful + 7) / 8) as usize;
+            let byte_count = meaningful.div_ceil(8) as usize;
             let mut mask = 0u64;
             for i in 0..byte_count {
                 mask |= (bytes[pos + i] as u64) << (i * 8);

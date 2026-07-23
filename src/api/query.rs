@@ -1,4 +1,5 @@
 pub struct Query {
+    #[allow(dead_code)]
     table: String,
     projection: Vec<String>,
     filter: Option<String>,

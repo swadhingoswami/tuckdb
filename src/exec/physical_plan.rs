@@ -285,17 +285,17 @@ impl PhysicalOperator for PhysicalAggregate {
                                 }
                             }
                             crate::exec::logical_plan::AggOp::Min => {
-                                if let Accumulator::Min(ref mut m) = entry[i] {
-                                    if n < *m {
-                                        *m = n;
-                                    }
+                                if let Accumulator::Min(ref mut m) = entry[i]
+                                    && n < *m
+                                {
+                                    *m = n;
                                 }
                             }
                             crate::exec::logical_plan::AggOp::Max => {
-                                if let Accumulator::Max(ref mut m) = entry[i] {
-                                    if n > *m {
-                                        *m = n;
-                                    }
+                                if let Accumulator::Max(ref mut m) = entry[i]
+                                    && n > *m
+                                {
+                                    *m = n;
                                 }
                             }
                         }
@@ -338,9 +338,8 @@ impl PhysicalOperator for PhysicalAggregate {
         }
 
         let mut columns = Vec::new();
-        for i in 0..self.group_by.len() {
-            let field =
-                crate::schema::Field::new(&self.group_by[i], crate::schema::DataType::Utf8, true);
+        for (i, col) in self.group_by.iter().enumerate() {
+            let field = crate::schema::Field::new(col, crate::schema::DataType::Utf8, true);
             columns.push(crate::exec::batch::Column::new(
                 field,
                 crate::exec::batch::ColumnData::Utf8(string_cols[i].clone()),
@@ -432,15 +431,13 @@ impl PhysicalOperator for FileScan {
                 let ref_cols = crate::exec::expr::referenced_columns(pred);
                 let mut can_skip = false;
                 for col_name in &ref_cols {
-                    if let Some(col_idx) = self.schema.index_of(col_name) {
-                        if let Some(meta) = col_metas.iter().find(|m| m.col_idx == col_idx as u32) {
-                            if let (Some(min), Some(max)) = (meta.stats.min, meta.stats.max) {
-                                if !crate::exec::expr::could_match(pred, col_name, min, max) {
-                                    can_skip = true;
-                                    break;
-                                }
-                            }
-                        }
+                    if let Some(col_idx) = self.schema.index_of(col_name)
+                        && let Some(meta) = col_metas.iter().find(|m| m.col_idx == col_idx as u32)
+                        && let (Some(min), Some(max)) = (meta.stats.min, meta.stats.max)
+                        && !crate::exec::expr::could_match(pred, col_name, min, max)
+                    {
+                        can_skip = true;
+                        break;
                     }
                 }
                 if can_skip {

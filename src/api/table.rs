@@ -112,15 +112,15 @@ impl Table {
                 projection,
                 filter,
             } => {
-                if self.persisted {
-                    if let Some(ref bytes) = self.blob_bytes {
-                        return Box::new(FileScan::new(
-                            self.name.clone(),
-                            bytes.clone(),
-                            projection.clone(),
-                            filter.clone(),
-                        ));
-                    }
+                if self.persisted
+                    && let Some(ref bytes) = self.blob_bytes
+                {
+                    return Box::new(FileScan::new(
+                        self.name.clone(),
+                        bytes.clone(),
+                        projection.clone(),
+                        filter.clone(),
+                    ));
                 }
                 let mut batches = self.batches.clone();
                 if let Some(pred) = filter {
@@ -169,13 +169,11 @@ impl Table {
                 if let Some(col_idx) = self.schema.index_of(col_name) {
                     let col = &batch.columns[col_idx];
                     let stats = crate::storage::encoding::column_stats(&col.data);
-                    if let Some(min) = stats.min {
-                        if let Some(max) = stats.max {
-                            if !crate::exec::expr::could_match(predicate, col_name, min, max) {
-                                possible = false;
-                                break;
-                            }
-                        }
+                    if let (Some(min), Some(max)) = (stats.min, stats.max)
+                        && !crate::exec::expr::could_match(predicate, col_name, min, max)
+                    {
+                        possible = false;
+                        break;
                     }
                 }
             }

@@ -41,12 +41,11 @@ impl BlobBackend for LocalFileSystem {
             for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
                 let entry = entry.map_err(|e| e.to_string())?;
                 let path = entry.path();
-                if path.is_file() {
-                    if let Some(s) = path.to_str() {
-                        if s.starts_with(prefix) {
-                            result.push(s.to_string());
-                        }
-                    }
+                if path.is_file()
+                    && let Some(s) = path.to_str()
+                    && s.starts_with(prefix)
+                {
+                    result.push(s.to_string());
                 }
             }
         }
