@@ -1,3 +1,6 @@
+<img width="1376" height="768" alt="Gemini_Generated_Image_ehre03ehre03ehre" src="https://github.com/user-attachments/assets/44d6b0ec-0164-43b8-820a-edb6f46ec6c7" />
+<img width="2048" height="1920" alt="licensed-image_1" src="https://github.com/user-attachments/assets/4cef399a-392a-4baa-9557-b0945d80db07" />
+
 <p align="center">
   <img src="https://img.shields.io/badge/status-beta-yellow" alt="Status">
   <img src="https://img.shields.io/badge/rust-1.85%2B-orange" alt="Rust">
@@ -727,7 +730,7 @@ Backend Infrastructure · Virtualization · Trusted Computing
 
 I design and build **foundational infrastructure** — storage engines, backup systems, TPM security runtimes, and now TuckDB. Each project solves a real systems problem: performance, reliability, and clean architecture.
 
-📧 **gsmswadhin@gmail.com**  |  📱 **+91 7204899841**  |  💻 **[github.com/swadhingoswami](https://github.com/swadhingoswami)**
+📧 **gsmswadhin@gmail.com** |  💻 **[github.com/swadhingoswami](https://github.com/swadhingoswami)**
 
 > *Exploring Staff / Principal / Senior Software Engineer roles in systems infrastructure. If TuckDB or any of my projects resonate with your team's challenges, I'd love to chat.*
 
