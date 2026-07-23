@@ -9,7 +9,8 @@ pub struct LocalFileSystem;
 impl BlobBackend for LocalFileSystem {
     fn read(&self, path: &str, offset: u64, len: u64) -> Result<Vec<u8>, String> {
         let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
-        file.seek(SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|e| e.to_string())?;
         let mut buf = vec![0u8; len as usize];
         file.read_exact(&mut buf).map_err(|e| e.to_string())?;
         Ok(buf)

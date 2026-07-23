@@ -60,7 +60,11 @@ impl RecordBatch {
             columns[0].data.len()
         };
         for col in &columns {
-            assert_eq!(col.data.len(), num_rows, "all columns must have same length");
+            assert_eq!(
+                col.data.len(),
+                num_rows,
+                "all columns must have same length"
+            );
         }
         Self {
             schema,

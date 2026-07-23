@@ -15,8 +15,7 @@ impl Optimizer {
     fn push_projection_into_scan(plan: LogicalPlan, schema: &Schema) -> LogicalPlan {
         match plan {
             LogicalPlan::Project { input, columns } => {
-                let new_input =
-                    Self::push_projection_into_scan(*input, schema);
+                let new_input = Self::push_projection_into_scan(*input, schema);
                 match new_input {
                     LogicalPlan::Scan {
                         table,

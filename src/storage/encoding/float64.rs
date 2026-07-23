@@ -116,7 +116,10 @@ mod tests {
         match result {
             ColumnData::Float64(v) => {
                 assert_eq!(v.len(), 8);
-                for (a, b) in v.iter().zip(vec![1.0, 2.5, 3.14, 0.0, -1.0, 1e10, 1.0, 1.0].iter()) {
+                for (a, b) in v
+                    .iter()
+                    .zip(vec![1.0, 2.5, 3.14, 0.0, -1.0, 1e10, 1.0, 1.0].iter())
+                {
                     assert!((a - b).abs() < 1e-10);
                 }
             }

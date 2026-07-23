@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use tuckdb::{
-    col, lit_int, Column, ColumnData, DataType, Field, LogicalPlan, RecordBatch, Schema, Table,
+    Column, ColumnData, DataType, Field, LogicalPlan, RecordBatch, Schema, Table, col, lit_int,
 };
 
 fn test_dir(name: &str) -> PathBuf {
@@ -29,10 +29,7 @@ fn test_create_table_and_insert() {
     let batch = RecordBatch::new(
         schema.clone(),
         vec![
-            Column::new(
-                schema.fields[0].clone(),
-                ColumnData::Int64(vec![1, 2, 3]),
-            ),
+            Column::new(schema.fields[0].clone(), ColumnData::Int64(vec![1, 2, 3])),
             Column::new(
                 schema.fields[1].clone(),
                 ColumnData::Float64(vec![10.0, 20.0, 30.0]),
@@ -108,10 +105,7 @@ fn test_flush_and_open() {
     let batch = RecordBatch::new(
         schema.clone(),
         vec![
-            Column::new(
-                schema.fields[0].clone(),
-                ColumnData::Int64(vec![1, 2, 3]),
-            ),
+            Column::new(schema.fields[0].clone(), ColumnData::Int64(vec![1, 2, 3])),
             Column::new(
                 schema.fields[1].clone(),
                 ColumnData::Utf8(vec!["a".into(), "b".into(), "c".into()]),
@@ -157,8 +151,7 @@ fn test_query_with_filter() {
     );
     table.insert_batch(batch);
 
-    let plan = LogicalPlan::scan("filter_test")
-        .filter(col("id").gt(lit_int(2)));
+    let plan = LogicalPlan::scan("filter_test").filter(col("id").gt(lit_int(2)));
     let mut rs = table.execute(plan);
     let mut total = 0;
     while let Some(batch) = rs.next_batch() {
@@ -181,10 +174,7 @@ fn test_query_with_projection() {
     let batch = RecordBatch::new(
         schema.clone(),
         vec![
-            Column::new(
-                schema.fields[0].clone(),
-                ColumnData::Int64(vec![1, 2, 3]),
-            ),
+            Column::new(schema.fields[0].clone(), ColumnData::Int64(vec![1, 2, 3])),
             Column::new(
                 schema.fields[1].clone(),
                 ColumnData::Float64(vec![1.0, 2.0, 3.0]),
@@ -197,8 +187,7 @@ fn test_query_with_projection() {
     );
     table.insert_batch(batch);
 
-    let plan = LogicalPlan::scan("proj_test")
-        .project(&["a", "c"]);
+    let plan = LogicalPlan::scan("proj_test").project(&["a", "c"]);
     let mut rs = table.execute(plan);
     let batch = rs.next_batch().unwrap();
     assert_eq!(batch.columns.len(), 2);
@@ -246,11 +235,10 @@ fn test_aggregate() {
     table.insert_batch(batch1);
     table.insert_batch(batch2);
 
-    let plan = LogicalPlan::scan("agg_test")
-        .aggregate(
-            vec![(tuckdb::AggOp::Sum, "val", "total")],
-            vec!["cat".to_string()],
-        );
+    let plan = LogicalPlan::scan("agg_test").aggregate(
+        vec![(tuckdb::AggOp::Sum, "val", "total")],
+        vec!["cat".to_string()],
+    );
 
     let mut rs = table.execute(plan);
     let batch = rs.next_batch().unwrap();
@@ -261,7 +249,8 @@ fn test_aggregate() {
     let sum_col = &batch.columns[1];
     match (&cat_col.data, &sum_col.data) {
         (tuckdb::ColumnData::Utf8(cats), tuckdb::ColumnData::Float64(sums)) => {
-            let mut results: std::collections::HashMap<&str, f64> = std::collections::HashMap::new();
+            let mut results: std::collections::HashMap<&str, f64> =
+                std::collections::HashMap::new();
             for (c, s) in cats.iter().zip(sums.iter()) {
                 results.insert(c.as_str(), *s);
             }

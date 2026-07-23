@@ -1,7 +1,7 @@
 use std::ffi::{CStr, CString};
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::ptr;
+use std::sync::Mutex;
 
 use sqlparser::ast::{
     BinaryOperator, Expr as SqlExpr, SelectItem, SetExpr, Statement, TableFactor, Value as SqlValue,
@@ -12,9 +12,9 @@ use sqlparser::parser::Parser;
 use crate::api::table::Table;
 use crate::exec::batch::{Column, ColumnData, RecordBatch};
 use crate::exec::expr::Expr;
+use crate::exec::expr::Value as TkValue;
 use crate::exec::logical_plan::LogicalPlan;
 use crate::schema::{DataType, Field, Schema};
-use crate::exec::expr::Value as TkValue;
 
 static LAST_ERROR: Mutex<Option<CString>> = Mutex::new(None);
 
@@ -114,7 +114,11 @@ fn parse_field_object(s: &str) -> Result<Field, String> {
             }
             c if !in_str && c.is_whitespace() => {}
             c => {
-                if in_key { key.push(c); } else { val.push(c); }
+                if in_key {
+                    key.push(c);
+                } else {
+                    val.push(c);
+                }
             }
         }
     }
@@ -152,7 +156,10 @@ fn parse_csv_names(s: *const libc::c_char) -> Vec<String> {
     if s.is_empty() {
         return vec![];
     }
-    s.split(',').map(|part| part.trim().to_string()).filter(|p| !p.is_empty()).collect()
+    s.split(',')
+        .map(|part| part.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect()
 }
 
 fn sql_to_tk_expr(e: &SqlExpr) -> Result<Expr, String> {
@@ -195,8 +202,8 @@ fn sql_to_tk_expr(e: &SqlExpr) -> Result<Expr, String> {
 
 fn sql_to_logical_plan(sql: &str, default_table: &str) -> Result<LogicalPlan, String> {
     let dialect = GenericDialect;
-    let mut stmts = Parser::parse_sql(&dialect, sql)
-        .map_err(|e| format!("SQL parse error: {}", e))?;
+    let mut stmts =
+        Parser::parse_sql(&dialect, sql).map_err(|e| format!("SQL parse error: {}", e))?;
 
     if stmts.len() != 1 {
         return Err("Expected a single SQL statement".to_string());
@@ -218,18 +225,23 @@ fn sql_to_logical_plan(sql: &str, default_table: &str) -> Result<LogicalPlan, St
     // Validate FROM clause references the correct table
     let from = &select.from[0];
     let sql_table = match &from.relation {
-        TableFactor::Table { name, .. } => {
-            name.0[0].as_ident().unwrap().value.clone()
-        }
+        TableFactor::Table { name, .. } => name.0[0].as_ident().unwrap().value.clone(),
         _ => return Err("Only simple table references are supported".to_string()),
     };
     if sql_table != default_table {
-        return Err(format!("Table '{}' not found (expected '{}')", sql_table, default_table));
+        return Err(format!(
+            "Table '{}' not found (expected '{}')",
+            sql_table, default_table
+        ));
     }
 
     let projection = if select.projection.is_empty() {
         vec![]
-    } else if select.projection.iter().any(|item| matches!(item, SelectItem::Wildcard(_))) {
+    } else if select
+        .projection
+        .iter()
+        .any(|item| matches!(item, SelectItem::Wildcard(_)))
+    {
         vec![]
     } else {
         let mut cols = Vec::new();
@@ -238,7 +250,10 @@ fn sql_to_logical_plan(sql: &str, default_table: &str) -> Result<LogicalPlan, St
                 SelectItem::UnnamedExpr(SqlExpr::Identifier(id)) => {
                     cols.push(id.value.clone());
                 }
-                SelectItem::ExprWithAlias { expr: SqlExpr::Identifier(_id), alias } => {
+                SelectItem::ExprWithAlias {
+                    expr: SqlExpr::Identifier(_id),
+                    alias,
+                } => {
                     cols.push(alias.value.clone());
                 }
                 _ => return Err("Only column references are supported in SELECT".to_string()),
@@ -415,13 +430,17 @@ pub extern "C" fn tuckdb_insert(
     let int_values: Vec<i64> = if int_cols.is_null() {
         vec![]
     } else {
-        (0..int_names.len()).map(|i| unsafe { *int_cols.add(i) }).collect()
+        (0..int_names.len())
+            .map(|i| unsafe { *int_cols.add(i) })
+            .collect()
     };
 
     let float_values: Vec<f64> = if float_cols.is_null() {
         vec![]
     } else {
-        (0..float_names.len()).map(|i| unsafe { *float_cols.add(i) }).collect()
+        (0..float_names.len())
+            .map(|i| unsafe { *float_cols.add(i) })
+            .collect()
     };
 
     let str_values: Vec<String> = if str_cols.is_null() {
@@ -433,7 +452,10 @@ pub extern "C" fn tuckdb_insert(
                 if p.is_null() {
                     String::new()
                 } else {
-                    unsafe { CStr::from_ptr(p) }.to_str().unwrap_or("").to_string()
+                    unsafe { CStr::from_ptr(p) }
+                        .to_str()
+                        .unwrap_or("")
+                        .to_string()
                 }
             })
             .collect()
@@ -460,42 +482,41 @@ pub extern "C" fn tuckdb_insert(
     let mut columns = Vec::with_capacity(schema.fields.len());
     for field in &schema.fields {
         let col = match field.data_type {
-            DataType::Int64 => {
-                match int_names.iter().position(|n| n == &field.name) {
-                    Some(idx) => Column::new(field.clone(), ColumnData::Int64(vec![int_values[idx]])),
-                    None => {
-                        set_error(&format!("Missing int64 column '{}'", field.name));
-                        return -1;
-                    }
+            DataType::Int64 => match int_names.iter().position(|n| n == &field.name) {
+                Some(idx) => Column::new(field.clone(), ColumnData::Int64(vec![int_values[idx]])),
+                None => {
+                    set_error(&format!("Missing int64 column '{}'", field.name));
+                    return -1;
                 }
-            }
-            DataType::Float64 => {
-                match float_names.iter().position(|n| n == &field.name) {
-                    Some(idx) => Column::new(field.clone(), ColumnData::Float64(vec![float_values[idx]])),
-                    None => {
-                        set_error(&format!("Missing float64 column '{}'", field.name));
-                        return -1;
-                    }
+            },
+            DataType::Float64 => match float_names.iter().position(|n| n == &field.name) {
+                Some(idx) => {
+                    Column::new(field.clone(), ColumnData::Float64(vec![float_values[idx]]))
                 }
-            }
-            DataType::Utf8 => {
-                match str_names.iter().position(|n| n == &field.name) {
-                    Some(idx) => Column::new(field.clone(), ColumnData::Utf8(vec![str_values[idx].clone()])),
-                    None => {
-                        set_error(&format!("Missing utf8 column '{}'", field.name));
-                        return -1;
-                    }
+                None => {
+                    set_error(&format!("Missing float64 column '{}'", field.name));
+                    return -1;
                 }
-            }
-            DataType::Timestamp => {
-                match int_names.iter().position(|n| n == &field.name) {
-                    Some(idx) => Column::new(field.clone(), ColumnData::Timestamp(vec![int_values[idx]])),
-                    None => {
-                        set_error(&format!("Missing timestamp column '{}'", field.name));
-                        return -1;
-                    }
+            },
+            DataType::Utf8 => match str_names.iter().position(|n| n == &field.name) {
+                Some(idx) => Column::new(
+                    field.clone(),
+                    ColumnData::Utf8(vec![str_values[idx].clone()]),
+                ),
+                None => {
+                    set_error(&format!("Missing utf8 column '{}'", field.name));
+                    return -1;
                 }
-            }
+            },
+            DataType::Timestamp => match int_names.iter().position(|n| n == &field.name) {
+                Some(idx) => {
+                    Column::new(field.clone(), ColumnData::Timestamp(vec![int_values[idx]]))
+                }
+                None => {
+                    set_error(&format!("Missing timestamp column '{}'", field.name));
+                    return -1;
+                }
+            },
         };
         columns.push(col);
     }
@@ -546,7 +567,9 @@ pub extern "C" fn tuckdb_query(
 
     if batches.is_empty() {
         let schema = guard.schema().clone();
-        let column_names: Vec<CString> = schema.fields.iter()
+        let column_names: Vec<CString> = schema
+            .fields
+            .iter()
             .map(|f| CString::new(f.name.clone()).unwrap_or_default())
             .collect();
         let num_cols = column_names.len();
@@ -561,7 +584,9 @@ pub extern "C" fn tuckdb_query(
 
     let schema = batches[0].schema.clone();
     let num_cols = schema.fields.len();
-    let column_names: Vec<CString> = schema.fields.iter()
+    let column_names: Vec<CString> = schema
+        .fields
+        .iter()
         .map(|f| CString::new(f.name.clone()).unwrap_or_default())
         .collect();
 
@@ -583,7 +608,9 @@ pub extern "C" fn tuckdb_query(
             ColumnData::Int64(_) => {
                 let mut all = Vec::new();
                 for cd in &col_vec {
-                    if let ColumnData::Int64(v) = cd { all.extend_from_slice(v); }
+                    if let ColumnData::Int64(v) = cd {
+                        all.extend_from_slice(v);
+                    }
                 }
                 total_rows = all.len();
                 columns.push(ColumnData::Int64(all));
@@ -591,7 +618,9 @@ pub extern "C" fn tuckdb_query(
             ColumnData::Float64(_) => {
                 let mut all = Vec::new();
                 for cd in &col_vec {
-                    if let ColumnData::Float64(v) = cd { all.extend_from_slice(v); }
+                    if let ColumnData::Float64(v) = cd {
+                        all.extend_from_slice(v);
+                    }
                 }
                 total_rows = all.len();
                 columns.push(ColumnData::Float64(all));
@@ -599,7 +628,9 @@ pub extern "C" fn tuckdb_query(
             ColumnData::Utf8(_) => {
                 let mut all = Vec::new();
                 for cd in &col_vec {
-                    if let ColumnData::Utf8(v) = cd { all.extend(v.iter().cloned()); }
+                    if let ColumnData::Utf8(v) = cd {
+                        all.extend(v.iter().cloned());
+                    }
                 }
                 total_rows = all.len();
                 columns.push(ColumnData::Utf8(all));
@@ -607,7 +638,9 @@ pub extern "C" fn tuckdb_query(
             ColumnData::Timestamp(_) => {
                 let mut all = Vec::new();
                 for cd in &col_vec {
-                    if let ColumnData::Timestamp(v) = cd { all.extend_from_slice(v); }
+                    if let ColumnData::Timestamp(v) = cd {
+                        all.extend_from_slice(v);
+                    }
                 }
                 total_rows = all.len();
                 columns.push(ColumnData::Timestamp(all));
@@ -627,13 +660,17 @@ pub extern "C" fn tuckdb_query(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tuckdb_result_num_rows(result: *const tuckdb_result_t) -> libc::c_int {
-    if result.is_null() { return 0; }
+    if result.is_null() {
+        return 0;
+    }
     unsafe { (*result).num_rows as libc::c_int }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tuckdb_result_num_cols(result: *const tuckdb_result_t) -> libc::c_int {
-    if result.is_null() { return 0; }
+    if result.is_null() {
+        return 0;
+    }
     unsafe { (*result).num_cols as libc::c_int }
 }
 
@@ -642,9 +679,13 @@ pub extern "C" fn tuckdb_result_column_name(
     result: *const tuckdb_result_t,
     col: libc::c_int,
 ) -> *const libc::c_char {
-    if result.is_null() { return ptr::null(); }
+    if result.is_null() {
+        return ptr::null();
+    }
     let r = unsafe { &*result };
-    if col < 0 || col as usize >= r.num_cols { return ptr::null(); }
+    if col < 0 || col as usize >= r.num_cols {
+        return ptr::null();
+    }
     r.column_names[col as usize].as_ptr()
 }
 
@@ -654,7 +695,9 @@ pub extern "C" fn tuckdb_result_value_double(
     row: libc::c_int,
     col: libc::c_int,
 ) -> f64 {
-    if result.is_null() { return 0.0; }
+    if result.is_null() {
+        return 0.0;
+    }
     let r = unsafe { &*result };
     if row < 0 || row as usize >= r.num_rows || col < 0 || col as usize >= r.num_cols {
         return 0.0;
@@ -668,7 +711,9 @@ pub extern "C" fn tuckdb_result_value_int(
     row: libc::c_int,
     col: libc::c_int,
 ) -> i64 {
-    if result.is_null() { return 0; }
+    if result.is_null() {
+        return 0;
+    }
     let r = unsafe { &*result };
     if row < 0 || row as usize >= r.num_rows || col < 0 || col as usize >= r.num_cols {
         return 0;
@@ -682,7 +727,9 @@ pub extern "C" fn tuckdb_result_value_string(
     row: libc::c_int,
     col: libc::c_int,
 ) -> *const libc::c_char {
-    if result.is_null() { return ptr::null(); }
+    if result.is_null() {
+        return ptr::null();
+    }
     let r = unsafe { &*result };
     if row < 0 || row as usize >= r.num_rows || col < 0 || col as usize >= r.num_cols {
         return ptr::null();
@@ -693,13 +740,17 @@ pub extern "C" fn tuckdb_result_value_string(
 #[unsafe(no_mangle)]
 pub extern "C" fn tuckdb_table_free(table: *mut tuckdb_table_t) {
     if !table.is_null() {
-        unsafe { drop(Box::from_raw(table)); }
+        unsafe {
+            drop(Box::from_raw(table));
+        }
     }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tuckdb_result_free(result: *mut tuckdb_result_t) {
     if !result.is_null() {
-        unsafe { drop(Box::from_raw(result)); }
+        unsafe {
+            drop(Box::from_raw(result));
+        }
     }
 }

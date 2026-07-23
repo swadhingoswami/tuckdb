@@ -1,9 +1,9 @@
-pub mod int64;
-pub mod float64;
-pub mod utf8;
-pub mod timestamp;
-pub mod rle;
 pub mod bitmap;
+pub mod float64;
+pub mod int64;
+pub mod rle;
+pub mod timestamp;
+pub mod utf8;
 
 use crate::exec::batch::ColumnData;
 use crate::storage::chunk::ColumnStats;
@@ -24,11 +24,7 @@ pub fn column_stats(data: &ColumnData) -> ColumnStats {
             let min = v.iter().min().copied();
             let max = v.iter().max().copied();
             let null_count = 0;
-            ColumnStats::new(
-                min.map(|m| m as f64),
-                max.map(|m| m as f64),
-                null_count,
-            )
+            ColumnStats::new(min.map(|m| m as f64), max.map(|m| m as f64), null_count)
         }
         ColumnData::Float64(v) => {
             let min = v.iter().min_by(|a, b| a.partial_cmp(b).unwrap()).copied();
@@ -43,11 +39,7 @@ pub fn column_stats(data: &ColumnData) -> ColumnStats {
         ColumnData::Timestamp(v) => {
             let min = v.iter().min().copied();
             let max = v.iter().max().copied();
-            ColumnStats::new(
-                min.map(|m| m as f64),
-                max.map(|m| m as f64),
-                0,
-            )
+            ColumnStats::new(min.map(|m| m as f64), max.map(|m| m as f64), 0)
         }
     }
 }

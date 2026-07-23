@@ -84,9 +84,8 @@ impl BlobWriter {
 }
 
 fn meta_serialized_size(m: &ChunkMeta) -> usize {
-    let stats_size = if m.stats.min.is_some() { 9 } else { 1 }
-        + if m.stats.max.is_some() { 9 } else { 1 }
-        + 8;
+    let stats_size =
+        if m.stats.min.is_some() { 9 } else { 1 } + if m.stats.max.is_some() { 9 } else { 1 } + 8;
     4 + 4 + 2 + 8 + 8 + 8 + stats_size
 }
 
@@ -219,10 +218,7 @@ mod tests {
         let batch = RecordBatch::new(
             schema.clone(),
             vec![
-                Column::new(
-                    schema.fields[0].clone(),
-                    ColumnData::Int64(vec![1, 2, 3]),
-                ),
+                Column::new(schema.fields[0].clone(), ColumnData::Int64(vec![1, 2, 3])),
                 Column::new(
                     schema.fields[1].clone(),
                     ColumnData::Utf8(vec!["a".into(), "b".into(), "c".into()]),

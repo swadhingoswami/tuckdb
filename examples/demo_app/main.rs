@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use tuckdb::{
-    col, lit_float, lit_str, Column, ColumnData, DataType, Field, LogicalPlan,
-    RecordBatch, Schema, Table,
+    Column, ColumnData, DataType, Field, LogicalPlan, RecordBatch, Schema, Table, col, lit_float,
+    lit_str,
 };
 
 fn main() {
@@ -28,7 +28,16 @@ fn main() {
             .map(|i| (i as f64) * 0.5)
             .collect();
         let tags: Vec<String> = (batch_idx * n..(batch_idx + 1) * n)
-            .map(|i| if i % 3 == 0 { "web" } else if i % 3 == 1 { "mobile" } else { "api" }.to_string())
+            .map(|i| {
+                if i % 3 == 0 {
+                    "web"
+                } else if i % 3 == 1 {
+                    "mobile"
+                } else {
+                    "api"
+                }
+                .to_string()
+            })
             .collect();
 
         let batch = RecordBatch::new(
@@ -58,8 +67,7 @@ fn main() {
 
     // Filter
     println!("\n--- Filter (score > 25000) ---");
-    let plan = LogicalPlan::scan("demo")
-        .filter(col("score").gt(lit_float(25000.0)));
+    let plan = LogicalPlan::scan("demo").filter(col("score").gt(lit_float(25000.0)));
     let mut rs = table.execute(plan);
     let mut count = 0usize;
     while let Some(batch) = rs.next_batch() {

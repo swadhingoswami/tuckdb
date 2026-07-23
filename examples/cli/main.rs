@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-use std::fs;
 use clap::{Parser, Subcommand};
 use csv::ReaderBuilder;
 use sqlparser::ast::{
@@ -8,7 +6,9 @@ use sqlparser::ast::{
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser as SqlParser;
-use tuckdb::exec::expr::{col, lit_float, lit_int, lit_str, Expr as TkExpr};
+use std::fs;
+use std::path::PathBuf;
+use tuckdb::exec::expr::{Expr as TkExpr, col, lit_float, lit_int, lit_str};
 use tuckdb::exec::logical_plan::{AggOp, LogicalPlan};
 use tuckdb::*;
 
@@ -48,7 +48,11 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
-        Commands::Load { csv_path, table, dir } => cmd_load(&csv_path, &table, &dir),
+        Commands::Load {
+            csv_path,
+            table,
+            dir,
+        } => cmd_load(&csv_path, &table, &dir),
         Commands::Query { query, dir } => cmd_query(&query, &dir),
         Commands::Scan { table, dir } => cmd_scan(&table, &dir),
         Commands::Info { table, dir } => cmd_info(&table, &dir),
@@ -156,8 +160,8 @@ fn cmd_query(query: &str, dir: &str) -> Result<(), Box<dyn std::error::Error>> {
     let dir_path = PathBuf::from(dir);
 
     let dialect = GenericDialect {};
-    let mut statements = SqlParser::parse_sql(&dialect, query)
-        .map_err(|e| format!("SQL parse error: {}", e))?;
+    let mut statements =
+        SqlParser::parse_sql(&dialect, query).map_err(|e| format!("SQL parse error: {}", e))?;
     if statements.is_empty() {
         return Err("No SQL statements found".into());
     }
@@ -221,7 +225,11 @@ fn cmd_info(table_name: &str, dir: &str) -> Result<(), Box<dyn std::error::Error
     Ok(())
 }
 
-fn build_plan(select: &sqlparser::ast::Select, table_name: &str, schema: &Schema) -> Result<LogicalPlan, Box<dyn std::error::Error>> {
+fn build_plan(
+    select: &sqlparser::ast::Select,
+    table_name: &str,
+    schema: &Schema,
+) -> Result<LogicalPlan, Box<dyn std::error::Error>> {
     let mut plan = LogicalPlan::scan(table_name);
 
     if let Some(ref selection) = select.selection {
@@ -238,7 +246,8 @@ fn build_plan(select: &sqlparser::ast::Select, table_name: &str, schema: &Schema
         is_aggregate_call(expr)
     });
 
-    let has_group_by = matches!(&select.group_by, GroupByExpr::Expressions(exprs, _) if !exprs.is_empty());
+    let has_group_by =
+        matches!(&select.group_by, GroupByExpr::Expressions(exprs, _) if !exprs.is_empty());
 
     if has_aggregates || has_group_by {
         let group_by_cols = match &select.group_by {
@@ -256,19 +265,28 @@ fn build_plan(select: &sqlparser::ast::Select, table_name: &str, schema: &Schema
             _ => Vec::new(),
         };
 
-        let first_col = schema.fields.first().map(|f| f.name.clone()).unwrap_or_default();
+        let first_col = schema
+            .fields
+            .first()
+            .map(|f| f.name.clone())
+            .unwrap_or_default();
 
         let mut aggs: Vec<(AggOp, String, String)> = Vec::new();
-        let need_final_project = project_aggregate_items(&select.projection, &group_by_cols, &mut aggs, &first_col)?;
+        let need_final_project =
+            project_aggregate_items(&select.projection, &group_by_cols, &mut aggs, &first_col)?;
 
-        let all_ref_cols = collect_agg_referenced_columns(&select.projection, &group_by_cols, &aggs);
+        let all_ref_cols =
+            collect_agg_referenced_columns(&select.projection, &group_by_cols, &aggs);
 
         if !all_ref_cols.is_empty() {
             let proj: Vec<&str> = all_ref_cols.iter().map(|s| s.as_str()).collect();
             plan = plan.project(&proj);
         }
 
-        let agg_refs: Vec<(AggOp, &str, &str)> = aggs.iter().map(|(op, col, name)| (op.clone(), col.as_str(), name.as_str())).collect();
+        let agg_refs: Vec<(AggOp, &str, &str)> = aggs
+            .iter()
+            .map(|(op, col, name)| (op.clone(), col.as_str(), name.as_str()))
+            .collect();
         plan = plan.aggregate(agg_refs, group_by_cols.clone());
 
         if need_final_project {
@@ -279,16 +297,22 @@ fn build_plan(select: &sqlparser::ast::Select, table_name: &str, schema: &Schema
             }
         }
     } else {
-        let has_wildcard = select.projection.iter().any(|item| matches!(item, SelectItem::Wildcard(_)));
+        let has_wildcard = select
+            .projection
+            .iter()
+            .any(|item| matches!(item, SelectItem::Wildcard(_)));
         if !has_wildcard {
             let cols: Vec<&str> = select
                 .projection
                 .iter()
                 .filter_map(|item| match item {
-                    SelectItem::UnnamedExpr(SqlExpr::Identifier(ident)) => Some(ident.value.as_str()),
-                    SelectItem::ExprWithAlias { expr: SqlExpr::Identifier(ident), .. } => {
+                    SelectItem::UnnamedExpr(SqlExpr::Identifier(ident)) => {
                         Some(ident.value.as_str())
                     }
+                    SelectItem::ExprWithAlias {
+                        expr: SqlExpr::Identifier(ident),
+                        ..
+                    } => Some(ident.value.as_str()),
                     _ => None,
                 })
                 .collect();
@@ -309,7 +333,9 @@ fn sql_to_tk_expr(sql: &SqlExpr) -> Result<TkExpr, Box<dyn std::error::Error>> {
                 if let Ok(i) = n.parse::<i64>() {
                     Ok(lit_int(i))
                 } else {
-                    Ok(lit_float(n.parse::<f64>().map_err(|e| format!("Bad number: {}", e))?))
+                    Ok(lit_float(
+                        n.parse::<f64>().map_err(|e| format!("Bad number: {}", e))?,
+                    ))
                 }
             }
             Value::SingleQuotedString(s) => Ok(lit_str(s)),
@@ -384,11 +410,13 @@ fn project_aggregate_items(
                         let (arg_name, is_wildcard) = get_agg_input_col(&f.args, first_col)?;
                         let out_name = match item {
                             SelectItem::ExprWithAlias { alias, .. } => alias.value.clone(),
-                            _ => if is_wildcard {
-                                format!("{}(*)", func_name.to_uppercase())
-                            } else {
-                                format!("{}({})", func_name.to_uppercase(), arg_name)
-                            },
+                            _ => {
+                                if is_wildcard {
+                                    format!("{}(*)", func_name.to_uppercase())
+                                } else {
+                                    format!("{}({})", func_name.to_uppercase(), arg_name)
+                                }
+                            }
                         };
                         aggs.push((op, arg_name, out_name.clone()));
                         output_order.push(out_name);
@@ -417,7 +445,10 @@ fn project_aggregate_items(
     Ok(output_order != default_order)
 }
 
-fn get_agg_input_col(args: &sqlparser::ast::FunctionArguments, first_col: &str) -> Result<(String, bool), Box<dyn std::error::Error>> {
+fn get_agg_input_col(
+    args: &sqlparser::ast::FunctionArguments,
+    first_col: &str,
+) -> Result<(String, bool), Box<dyn std::error::Error>> {
     match args {
         sqlparser::ast::FunctionArguments::List(list) => {
             if let Some(arg) = list.args.first() {

@@ -9,9 +9,9 @@ use crate::exec::physical_plan::{
     BoxedOperator, FileScan, PhysicalAggregate, PhysicalFilter, PhysicalProject, PhysicalScan,
 };
 
+use crate::api::result::ResultSet;
 use crate::schema::Schema;
 use crate::storage::format::{BlobReader, BlobWriter};
-use crate::api::result::ResultSet;
 
 pub struct Table {
     name: String,
@@ -126,7 +126,11 @@ impl Table {
                 if let Some(pred) = filter {
                     batches = self.apply_chunk_skipping(batches, pred);
                 }
-                Box::new(PhysicalScan::new(batches, projection.clone(), filter.clone()))
+                Box::new(PhysicalScan::new(
+                    batches,
+                    projection.clone(),
+                    filter.clone(),
+                ))
             }
             LogicalPlan::Filter { input, predicate } => {
                 let child = self.build_physical(input);
@@ -142,7 +146,11 @@ impl Table {
                 group_by,
             } => {
                 let child = self.build_physical(input);
-                Box::new(PhysicalAggregate::new(child, aggs.clone(), group_by.clone()))
+                Box::new(PhysicalAggregate::new(
+                    child,
+                    aggs.clone(),
+                    group_by.clone(),
+                ))
             }
         }
     }

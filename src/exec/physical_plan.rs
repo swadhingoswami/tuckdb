@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::exec::batch::{Column, ColumnData, RecordBatch};
-use crate::exec::expr::{eval_filter, Expr};
+use crate::exec::expr::{Expr, eval_filter};
 use crate::schema::Schema;
 use crate::storage::chunk::ChunkMeta;
 use crate::storage::encoding;
@@ -21,11 +21,7 @@ pub struct PhysicalScan {
 }
 
 impl PhysicalScan {
-    pub fn new(
-        batches: Vec<RecordBatch>,
-        projection: Vec<String>,
-        filter: Option<Expr>,
-    ) -> Self {
+    pub fn new(batches: Vec<RecordBatch>, projection: Vec<String>, filter: Option<Expr>) -> Self {
         Self {
             batches,
             idx: 0,
@@ -85,10 +81,7 @@ impl PhysicalOperator for PhysicalScan {
                         crate::exec::batch::ColumnData::Timestamp(filtered)
                     }
                 };
-                new_cols.push(crate::exec::batch::Column::new(
-                    col.field.clone(),
-                    new_data,
-                ));
+                new_cols.push(crate::exec::batch::Column::new(col.field.clone(), new_data));
             }
             result = RecordBatch::new(result.schema.clone(), new_cols);
         }
@@ -346,19 +339,15 @@ impl PhysicalOperator for PhysicalAggregate {
 
         let mut columns = Vec::new();
         for i in 0..self.group_by.len() {
-            let field = crate::schema::Field::new(
-                &self.group_by[i],
-                crate::schema::DataType::Utf8,
-                true,
-            );
+            let field =
+                crate::schema::Field::new(&self.group_by[i], crate::schema::DataType::Utf8, true);
             columns.push(crate::exec::batch::Column::new(
                 field,
                 crate::exec::batch::ColumnData::Utf8(string_cols[i].clone()),
             ));
         }
         for (i, (_, _, out_name)) in self.aggs.iter().enumerate() {
-            let field =
-                crate::schema::Field::new(out_name, crate::schema::DataType::Float64, true);
+            let field = crate::schema::Field::new(out_name, crate::schema::DataType::Float64, true);
             columns.push(crate::exec::batch::Column::new(
                 field,
                 crate::exec::batch::ColumnData::Float64(float_cols[i].clone()),
@@ -468,11 +457,8 @@ impl PhysicalOperator for FileScan {
                 let start = meta.offset as usize;
                 let end = start + meta.compressed_size as usize;
                 let raw = self.bytes[start..end].to_vec();
-                let decoded = encoding::decode_column(
-                    meta.encoding,
-                    &raw,
-                    meta.uncompressed_size as usize,
-                );
+                let decoded =
+                    encoding::decode_column(meta.encoding, &raw, meta.uncompressed_size as usize);
                 let field = self.schema.fields[col_idx].clone();
                 columns.push(Column::new(field, decoded));
             }
@@ -483,18 +469,34 @@ impl PhysicalOperator for FileScan {
                 let mut new_cols = Vec::with_capacity(tmp.columns.len());
                 for col in &tmp.columns {
                     let new_data = match &col.data {
-                        ColumnData::Int64(v) => {
-                            ColumnData::Int64(v.iter().enumerate().filter(|(i, _)| mask[*i]).map(|(_, vv)| *vv).collect())
-                        }
-                        ColumnData::Float64(v) => {
-                            ColumnData::Float64(v.iter().enumerate().filter(|(i, _)| mask[*i]).map(|(_, vv)| *vv).collect())
-                        }
-                        ColumnData::Utf8(v) => {
-                            ColumnData::Utf8(v.iter().enumerate().filter(|(i, _)| mask[*i]).map(|(_, vv)| vv.clone()).collect())
-                        }
-                        ColumnData::Timestamp(v) => {
-                            ColumnData::Timestamp(v.iter().enumerate().filter(|(i, _)| mask[*i]).map(|(_, vv)| *vv).collect())
-                        }
+                        ColumnData::Int64(v) => ColumnData::Int64(
+                            v.iter()
+                                .enumerate()
+                                .filter(|(i, _)| mask[*i])
+                                .map(|(_, vv)| *vv)
+                                .collect(),
+                        ),
+                        ColumnData::Float64(v) => ColumnData::Float64(
+                            v.iter()
+                                .enumerate()
+                                .filter(|(i, _)| mask[*i])
+                                .map(|(_, vv)| *vv)
+                                .collect(),
+                        ),
+                        ColumnData::Utf8(v) => ColumnData::Utf8(
+                            v.iter()
+                                .enumerate()
+                                .filter(|(i, _)| mask[*i])
+                                .map(|(_, vv)| vv.clone())
+                                .collect(),
+                        ),
+                        ColumnData::Timestamp(v) => ColumnData::Timestamp(
+                            v.iter()
+                                .enumerate()
+                                .filter(|(i, _)| mask[*i])
+                                .map(|(_, vv)| *vv)
+                                .collect(),
+                        ),
                     };
                     new_cols.push(Column::new(col.field.clone(), new_data));
                 }

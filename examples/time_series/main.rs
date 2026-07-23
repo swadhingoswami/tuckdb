@@ -49,7 +49,10 @@ fn main() {
         );
         table.insert_batch(batch);
     }
-    println!("  Inserted {} rows (3 servers × 10 timestamps)\n", table.num_rows());
+    println!(
+        "  Inserted {} rows (3 servers × 10 timestamps)\n",
+        table.num_rows()
+    );
 
     // Query 1: High CPU servers
     println!("Query 1: Servers with CPU > 70");
@@ -116,7 +119,10 @@ fn main() {
                     ColumnData::Float64(v) => v[row] as u64,
                     _ => 0,
                 };
-                println!("  {}: avg_cpu={:.1}% avg_mem={:.1}% total_reqs={}", server, avg_cpu, avg_mem, total_reqs);
+                println!(
+                    "  {}: avg_cpu={:.1}% avg_mem={:.1}% total_reqs={}",
+                    server, avg_cpu, avg_mem, total_reqs
+                );
             }
         }
     }
@@ -152,7 +158,11 @@ fn main() {
     println!("Persisting to disk...");
     table.flush();
     let reloaded = Table::open("metrics", dir);
-    println!("Reloaded {} rows, data version: {}\n", reloaded.num_rows(), reloaded.data_version());
+    println!(
+        "Reloaded {} rows, data version: {}\n",
+        reloaded.num_rows(),
+        reloaded.data_version()
+    );
 
     println!("=== Time-series scenarios completed ===");
 }

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use crate::storage::chunk::EncodedChunk;
 use crate::cache::policy::EvictionPolicy;
+use crate::storage::chunk::EncodedChunk;
 
 #[derive(Debug, Clone)]
 struct CacheEntry {
@@ -64,18 +64,16 @@ impl DataCache {
 
     fn evict_one(&mut self) {
         let key = match self.policy {
-            EvictionPolicy::LRU => {
-                self.entries
-                    .iter()
-                    .min_by_key(|(_, e)| e.last_access)
-                    .map(|(k, _)| k.clone())
-            }
-            EvictionPolicy::LFU => {
-                self.entries
-                    .iter()
-                    .min_by_key(|(_, e)| e.hit_count)
-                    .map(|(k, _)| k.clone())
-            }
+            EvictionPolicy::LRU => self
+                .entries
+                .iter()
+                .min_by_key(|(_, e)| e.last_access)
+                .map(|(k, _)| k.clone()),
+            EvictionPolicy::LFU => self
+                .entries
+                .iter()
+                .min_by_key(|(_, e)| e.hit_count)
+                .map(|(k, _)| k.clone()),
         };
 
         if let Some(k) = key {

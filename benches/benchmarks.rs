@@ -1,6 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use tuckdb::cache::policy::EvictionPolicy;
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use tuckdb::cache::DataCache;
+use tuckdb::cache::policy::EvictionPolicy;
 use tuckdb::exec::batch::{Column, ColumnData, RecordBatch};
 use tuckdb::exec::expr::{col, lit_float};
 use tuckdb::exec::logical_plan::AggOp;
@@ -33,8 +33,7 @@ impl Rng {
         self.next_u64() as i64
     }
     fn next_f64(&mut self) -> f64 {
-        f64::from_bits(0x3FF0000000000000 | (self.next_u64() >> 12))
-            .mul_add(1000.0, -500.0)
+        f64::from_bits(0x3FF0000000000000 | (self.next_u64() >> 12)).mul_add(1000.0, -500.0)
     }
 }
 
@@ -68,7 +67,11 @@ fn rand_floats(n: usize, seed: u64) -> ColumnData {
 fn strings(n: usize, distinct: usize) -> ColumnData {
     let mut r = Rng::new(42);
     let dict: Vec<String> = (0..distinct).map(|i| format!("val_{}", i)).collect();
-    ColumnData::Utf8((0..n).map(|_| dict[(r.next_u64() as usize) % dict.len()].clone()).collect())
+    ColumnData::Utf8(
+        (0..n)
+            .map(|_| dict[(r.next_u64() as usize) % dict.len()].clone())
+            .collect(),
+    )
 }
 
 fn bitmap_data(n: usize, seed: u64) -> ColumnData {
@@ -104,7 +107,10 @@ fn bench_encode(
 ) {
     let compressed = encoder.encode(data);
     let ratio = raw_bytes as f64 / compressed.len() as f64;
-    eprintln!("  {label:<18}  ratio={ratio:5.1}x  raw={raw_bytes:>8}  cmp={:>8}", compressed.len());
+    eprintln!(
+        "  {label:<18}  ratio={ratio:5.1}x  raw={raw_bytes:>8}  cmp={:>8}",
+        compressed.len()
+    );
 
     let mut g = c.benchmark_group(format!("encode/{label}"));
     g.throughput(Throughput::Bytes(raw_bytes));
@@ -116,9 +122,19 @@ fn bench_encode(
     // reuse compressed data for decode benchmark
     let mut g = c.benchmark_group(format!("decode/{label}"));
     g.throughput(Throughput::Bytes(raw_bytes));
-    g.bench_with_input(BenchmarkId::new("size", size), &(compressed, size), |b, (cdata, sz)| {
-        b.iter(|| black_box(tuckdb::storage::encoding::decode_column(encoder.encoding_id(), cdata, *sz)));
-    });
+    g.bench_with_input(
+        BenchmarkId::new("size", size),
+        &(compressed, size),
+        |b, (cdata, sz)| {
+            b.iter(|| {
+                black_box(tuckdb::storage::encoding::decode_column(
+                    encoder.encoding_id(),
+                    cdata,
+                    *sz,
+                ))
+            });
+        },
+    );
     g.finish();
 }
 
@@ -133,11 +149,25 @@ fn encoding_benchmarks(c: &mut Criterion) {
         // Delta+varint – sequential ints
         let data = seq_ints(size);
         let raw_bytes = (size * 8) as u64;
-        bench_encode(c, "delta_varint/seq", size, &data, &int64::DeltaBitpackEncoder, raw_bytes);
+        bench_encode(
+            c,
+            "delta_varint/seq",
+            size,
+            &data,
+            &int64::DeltaBitpackEncoder,
+            raw_bytes,
+        );
 
         // Delta+varint – random ints
         let data = rand_ints(size, 0xdead);
-        bench_encode(c, "delta_varint/rand", size, &data, &int64::DeltaBitpackEncoder, raw_bytes);
+        bench_encode(
+            c,
+            "delta_varint/rand",
+            size,
+            &data,
+            &int64::DeltaBitpackEncoder,
+            raw_bytes,
+        );
 
         // XOR – time-series floats
         let data = ts_floats(size);
@@ -149,14 +179,28 @@ fn encoding_benchmarks(c: &mut Criterion) {
         bench_encode(c, "xor/rand", size, &data, &float64::XorEncoder, raw_bytes);
 
         // Dict+ZSTD – high-repetition strings
-        let data = strings(size, size / 100);          // 1% distinct
-        let raw_bytes = data.len() as u64 * 16;        // approx
-        bench_encode(c, "dict_zstd/highrep", size, &data, &utf8::DictZstdEncoder, raw_bytes);
+        let data = strings(size, size / 100); // 1% distinct
+        let raw_bytes = data.len() as u64 * 16; // approx
+        bench_encode(
+            c,
+            "dict_zstd/highrep",
+            size,
+            &data,
+            &utf8::DictZstdEncoder,
+            raw_bytes,
+        );
 
         // Dict+ZSTD – low-repetition strings
-        let data = strings(size, size / 2);             // 50% distinct
+        let data = strings(size, size / 2); // 50% distinct
         let raw_bytes = data.len() as u64 * 16;
-        bench_encode(c, "dict_zstd/lowrep", size, &data, &utf8::DictZstdEncoder, raw_bytes);
+        bench_encode(
+            c,
+            "dict_zstd/lowrep",
+            size,
+            &data,
+            &utf8::DictZstdEncoder,
+            raw_bytes,
+        );
 
         // RLE
         let data = rle_data(size, 50, 0xcafe);
@@ -189,7 +233,9 @@ fn query_benchmarks(c: &mut Criterion) {
             let base = b * bs;
             let mut r = Rng::new(b as u64);
             let ids: Vec<i64> = (base..base + bs).map(|i| i as i64).collect();
-            let cats: Vec<String> = (0..bs).map(|_| format!("cat_{}", r.next_u64() % 10)).collect();
+            let cats: Vec<String> = (0..bs)
+                .map(|_| format!("cat_{}", r.next_u64() % 10))
+                .collect();
             let vals: Vec<f64> = (0..bs).map(|_| r.next_f64()).collect();
             let ts: Vec<i64> = (base as i64..(base + bs) as i64).collect();
             batches.push(RecordBatch::new(
@@ -218,52 +264,65 @@ fn query_benchmarks(c: &mut Criterion) {
         });
 
         // Filter 50% (non-selective)
-        g.bench_with_input(BenchmarkId::new("filter_50pct", size), &batches, |b, data| {
-            b.iter(|| {
-                let scan = PhysicalScan::new(data.clone(), vec![], None);
-                let mut op = PhysicalFilter::new(Box::new(scan), col("value").gt(lit_float(0.0)));
-                let mut n = 0usize;
-                while let Some(batch) = op.next_batch() {
-                    n += batch.num_rows;
-                }
-                black_box(n);
-            });
-        });
+        g.bench_with_input(
+            BenchmarkId::new("filter_50pct", size),
+            &batches,
+            |b, data| {
+                b.iter(|| {
+                    let scan = PhysicalScan::new(data.clone(), vec![], None);
+                    let mut op =
+                        PhysicalFilter::new(Box::new(scan), col("value").gt(lit_float(0.0)));
+                    let mut n = 0usize;
+                    while let Some(batch) = op.next_batch() {
+                        n += batch.num_rows;
+                    }
+                    black_box(n);
+                });
+            },
+        );
 
         // Filter 10% (selective)
-        g.bench_with_input(BenchmarkId::new("filter_10pct", size), &batches, |b, data| {
-            b.iter(|| {
-                let scan = PhysicalScan::new(data.clone(), vec![], None);
-                let mut op =
-                    PhysicalFilter::new(Box::new(scan), col("value").gt(lit_float(900.0)));
-                let mut n = 0usize;
-                while let Some(batch) = op.next_batch() {
-                    n += batch.num_rows;
-                }
-                black_box(n);
-            });
-        });
+        g.bench_with_input(
+            BenchmarkId::new("filter_10pct", size),
+            &batches,
+            |b, data| {
+                b.iter(|| {
+                    let scan = PhysicalScan::new(data.clone(), vec![], None);
+                    let mut op =
+                        PhysicalFilter::new(Box::new(scan), col("value").gt(lit_float(900.0)));
+                    let mut n = 0usize;
+                    while let Some(batch) = op.next_batch() {
+                        n += batch.num_rows;
+                    }
+                    black_box(n);
+                });
+            },
+        );
 
         // Aggregation (GROUP BY category, SUM(value), COUNT(*), AVG(value))
-        g.bench_with_input(BenchmarkId::new("aggregation", size), &batches, |b, data| {
-            b.iter(|| {
-                let scan = PhysicalScan::new(data.clone(), vec![], None);
-                let mut op = PhysicalAggregate::new(
-                    Box::new(scan),
-                    vec![
-                        (AggOp::Sum, "value".to_string(), "total".to_string()),
-                        (AggOp::Count, "id".to_string(), "cnt".to_string()),
-                        (AggOp::Avg, "value".to_string(), "avg_val".to_string()),
-                    ],
-                    vec!["category".to_string()],
-                );
-                let mut n = 0usize;
-                while let Some(batch) = op.next_batch() {
-                    n += batch.num_rows;
-                }
-                black_box(n);
-            });
-        });
+        g.bench_with_input(
+            BenchmarkId::new("aggregation", size),
+            &batches,
+            |b, data| {
+                b.iter(|| {
+                    let scan = PhysicalScan::new(data.clone(), vec![], None);
+                    let mut op = PhysicalAggregate::new(
+                        Box::new(scan),
+                        vec![
+                            (AggOp::Sum, "value".to_string(), "total".to_string()),
+                            (AggOp::Count, "id".to_string(), "cnt".to_string()),
+                            (AggOp::Avg, "value".to_string(), "avg_val".to_string()),
+                        ],
+                        vec!["category".to_string()],
+                    );
+                    let mut n = 0usize;
+                    while let Some(batch) = op.next_batch() {
+                        n += batch.num_rows;
+                    }
+                    black_box(n);
+                });
+            },
+        );
 
         // Combined: filter + project + aggregate
         g.bench_with_input(BenchmarkId::new("combined", size), &batches, |b, data| {

@@ -44,7 +44,10 @@ fn main() {
     let batch = RecordBatch::new(
         schema.clone(),
         vec![
-            Column::new(schema.fields[0].clone(), ColumnData::Int64(vec![101, 102, 103])),
+            Column::new(
+                schema.fields[0].clone(),
+                ColumnData::Int64(vec![101, 102, 103]),
+            ),
             Column::new(
                 schema.fields[1].clone(),
                 ColumnData::Utf8(vec!["Widget".into(), "Gadget".into(), "Doohickey".into()]),
@@ -53,7 +56,10 @@ fn main() {
                 schema.fields[2].clone(),
                 ColumnData::Float64(vec![9.99, 24.99, 49.99]),
             ),
-            Column::new(schema.fields[3].clone(), ColumnData::Int64(vec![100, 50, 25])),
+            Column::new(
+                schema.fields[3].clone(),
+                ColumnData::Int64(vec![100, 50, 25]),
+            ),
         ],
     );
     table.insert_batch(batch);

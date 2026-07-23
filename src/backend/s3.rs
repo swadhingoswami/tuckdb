@@ -10,7 +10,9 @@ pub struct S3Backend {
 impl S3Backend {
     pub fn new(bucket: &str, prefix: Option<&str>) -> Self {
         let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-        let config = runtime.block_on(aws_config::load_defaults(aws_config::BehaviorVersion::latest()));
+        let config = runtime.block_on(aws_config::load_defaults(
+            aws_config::BehaviorVersion::latest(),
+        ));
         let client = aws_sdk_s3::Client::new(&config);
         Self {
             client,
@@ -40,11 +42,7 @@ impl BlobBackend for S3Backend {
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
-            let data = output
-                .body
-                .collect()
-                .await
-                .map_err(|e| e.to_string())?;
+            let data = output.body.collect().await.map_err(|e| e.to_string())?;
             Ok(data.to_vec())
         })
     }

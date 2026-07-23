@@ -37,10 +37,7 @@ fn main() {
                 schema.fields[2].clone(),
                 ColumnData::Float64(vec![85.5, 92.0, 78.3]),
             ),
-            Column::new(
-                schema.fields[3].clone(),
-                ColumnData::Int64(vec![1, 1, 0]),
-            ),
+            Column::new(schema.fields[3].clone(), ColumnData::Int64(vec![1, 1, 0])),
         ],
     );
     let batch2 = RecordBatch::new(
@@ -55,10 +52,7 @@ fn main() {
                 schema.fields[2].clone(),
                 ColumnData::Float64(vec![95.0, 88.1]),
             ),
-            Column::new(
-                schema.fields[3].clone(),
-                ColumnData::Int64(vec![0, 1]),
-            ),
+            Column::new(schema.fields[3].clone(), ColumnData::Int64(vec![0, 1])),
         ],
     );
     table.insert_batch(batch1);
@@ -110,7 +104,10 @@ fn main() {
                     ColumnData::Float64(v) => v[row],
                     _ => 0.0,
                 };
-                println!("    Row {}: id={}, name={}, score={:.1}", count, id, name, score);
+                println!(
+                    "    Row {}: id={}, name={}, score={:.1}",
+                    count, id, name, score
+                );
             }
         }
         println!("  Total: {} rows\n", count);

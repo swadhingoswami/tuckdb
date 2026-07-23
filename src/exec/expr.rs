@@ -135,16 +135,34 @@ fn cmp_value(a: &Value, b: &Value) -> i32 {
     match (a, b) {
         (Value::Int(ai), Value::Int(bi)) => ai.cmp(bi) as i32,
         (Value::Float(af), Value::Float(bf)) => {
-            if af < bf { -1 } else if af > bf { 1 } else { 0 }
+            if af < bf {
+                -1
+            } else if af > bf {
+                1
+            } else {
+                0
+            }
         }
         (Value::Str(as_), Value::Str(bs)) => as_.cmp(bs) as i32,
         (Value::Int(ai), Value::Float(bf)) => {
             let af = *ai as f64;
-            if af < *bf { -1 } else if af > *bf { 1 } else { 0 }
+            if af < *bf {
+                -1
+            } else if af > *bf {
+                1
+            } else {
+                0
+            }
         }
         (Value::Float(af), Value::Int(bi)) => {
             let bf = *bi as f64;
-            if *af < bf { -1 } else if *af > bf { 1 } else { 0 }
+            if *af < bf {
+                -1
+            } else if *af > bf {
+                1
+            } else {
+                0
+            }
         }
         _ => 0,
     }

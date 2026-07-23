@@ -1,5 +1,5 @@
 use crate::exec::batch::ColumnData;
-use crate::storage::encoding::{int64, Decoder, Encoder};
+use crate::storage::encoding::{Decoder, Encoder, int64};
 
 /// Wraps Int64 delta+varint encoding but returns Timestamp type on decode.
 pub struct TimestampEncoder;
