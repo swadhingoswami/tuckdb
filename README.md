@@ -432,8 +432,7 @@ flowchart LR
 
 ---
 
-## 🏗 Architecture (30-second version)
-
+## 🏗 Architecture 
 ```mermaid
 flowchart TB
     APP["Application"] --> API
