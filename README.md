@@ -238,6 +238,166 @@ cargo run --release --example time_series
 
 ---
 
+## 🔌 Use from any language (C API)
+
+TuckDB compiles to a **C shared library** that any language can call — C, C++, Python, Java, C#, Go, Swift, Ruby, Zig, and more.
+
+### Build the shared library
+
+```bash
+cargo build --release --features capi
+```
+
+Output files:
+| Platform | Library | Header |
+|----------|---------|--------|
+| **Linux** | `target/release/libtuckdb.so` | `capi/tuckdb.h` |
+| **macOS** | `target/release/libtuckdb.dylib` | `capi/tuckdb.h` |
+| **Windows** | `target/release/tuckdb.dll` + `tuckdb.lib` | `capi/tuckdb.h` |
+
+### C / C++
+
+```c
+#include "tuckdb.h"
+#include <stdio.h>
+
+int main() {
+    tuckdb_table_t* table = tuckdb_create(
+        "sensors",
+        "[{\"name\":\"temp\",\"type\":\"Float64\"},{\"name\":\"humidity\",\"type\":\"Int64\"}]",
+        "/tmp/db"
+    );
+    if (!table) { printf("Error: %s\n", tuckdb_error_message(0)); return 1; }
+
+    // Insert data (temperature columns)
+    double temps[] = {22.5, 23.0, 21.8};
+    int64_t hums[] = {65, 70, 60};
+    tuckdb_insert(table, 2, NULL, "", temps, "temp", NULL, "");
+
+    // Query
+    tuckdb_result_t* res = tuckdb_query(table, "SELECT * FROM sensors WHERE temp > 22");
+    for (int r = 0; r < tuckdb_result_num_rows(res); r++) {
+        double t = tuckdb_result_value_double(res, r, 0);
+        printf("temp = %.1f\n", t);
+    }
+
+    tuckdb_result_free(res);
+    tuckdb_table_free(table);
+    return 0;
+}
+```
+
+```bash
+# Compile and link
+gcc -o myapp myapp.c -I./capi -L./target/release -ltuckdb
+./myapp
+```
+
+### Python
+
+```python
+import ctypes
+import os
+
+lib = ctypes.cdll.LoadLibrary("./target/release/libtuckdb.dylib")
+
+# Define function signatures
+lib.tuckdb_create.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p]
+lib.tuckdb_create.restype = ctypes.c_void_p
+
+table = lib.tuckdb_create(
+    b"sensors",
+    b'[{"name":"temp","type":"Float64"},{"name":"humidity","type":"Int64"}]',
+    b"/tmp/db"
+)
+
+# Query
+lib.tuckdb_query.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+lib.tuckdb_query.restype = ctypes.c_void_p
+
+res = lib.tuckdb_query(table, b"SELECT AVG(temp) FROM sensors")
+rows = lib.tuckdb_result_num_rows(res)
+cols = lib.tuckdb_result_num_cols(res)
+print(f"{rows} rows, {cols} cols")
+```
+
+### Java (JNI)
+
+```java
+public class TuckDB {
+    static { System.loadLibrary("tuckdb"); }
+
+    // Native method declarations matching the C API
+    public static native long tuckdb_create(String name, String schema, String path);
+    public static native long tuckdb_query(long table, String sql);
+    // ... wrap with JNI generator or hand-written native methods
+}
+```
+
+### C# / .NET (P/Invoke)
+
+```csharp
+using System.Runtime.InteropServices;
+
+class TuckDB {
+    [DllImport("tuckdb")] static extern IntPtr tuckdb_create(string name, string schema, string path);
+    [DllImport("tuckdb")] static extern IntPtr tuckdb_query(IntPtr table, string sql);
+    // ...
+}
+```
+
+### Go (cgo)
+
+```go
+/*
+#cgo LDFLAGS: -L./target/release -ltuckdb
+#include "tuckdb.h"
+*/
+import "C"
+
+func main() {
+    table := C.tuckdb_create(
+        C.CString("sensors"),
+        C.CString(`[{"name":"temp","type":"Float64"}]`),
+        C.CString("/tmp/db"),
+    )
+    result := C.tuckdb_query(table, C.CString("SELECT * FROM sensors"))
+    // ...
+}
+```
+
+### Full C API reference
+
+All functions are documented in [`capi/tuckdb.h`](capi/tuckdb.h):
+
+```c
+// Lifecycle
+tuckdb_table_t* tuckdb_create(const char* name, const char* schema_json, const char* path);
+tuckdb_table_t* tuckdb_open(const char* name, const char* path);
+void            tuckdb_table_free(tuckdb_table_t* table);
+
+// Insert
+int tuckdb_insert(tuckdb_table_t* table, int num_columns,
+                  const int64_t* int_cols, const char* int_col_names,
+                  const double* float_cols, const char* float_col_names,
+                  const char* const* str_cols, const char* str_col_names);
+
+// Query
+tuckdb_result_t* tuckdb_query(tuckdb_table_t* table, const char* sql);
+int             tuckdb_result_num_rows(tuckdb_result_t* result);
+int             tuckdb_result_num_cols(tuckdb_result_t* result);
+const char*     tuckdb_result_column_name(tuckdb_result_t* result, int col);
+double          tuckdb_result_value_double(tuckdb_result_t* result, int row, int col);
+const char*     tuckdb_result_value_string(tuckdb_result_t* result, int row, int col);
+int64_t         tuckdb_result_value_int(tuckdb_result_t* result, int row, int col);
+void            tuckdb_result_free(tuckdb_result_t* result);
+
+// Error handling
+const char* tuckdb_error_message(int code);
+```
+
+---
+
 ## 🤔 Why another analytics library?
 
 > *"Today, getting analytics means: store data in S3 → convert to Parquet → run DuckDB → cache with Redis. That's 4 systems talking to each other. None of them co-designed."*
