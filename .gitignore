@@ -1,0 +1,4 @@
+/target
+Cargo.lock
+*.tuck
+/tmp/tuckdb_*
