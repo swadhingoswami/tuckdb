@@ -134,6 +134,110 @@ File size: 644 bytes
 
 ---
 
+## 📥 Installation
+
+### Prerequisites
+
+- **Rust** (1.85+): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- **C compiler** (zstd dependency): `build-essential` (Linux), `xcode-select --install` (macOS), or MSVC Build Tools (Windows)
+
+### Linux (Ubuntu/Debian)
+
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Install build dependencies
+sudo apt update && sudo apt install build-essential pkg-config libssl-dev
+
+# Clone and build
+git clone https://github.com/swadhingoswami/tuckdb.git
+cd tuckdb
+cargo build --release
+
+# Run CLI
+cargo run --example cli -- help
+```
+
+### Linux (Fedora/RHEL)
+
+```bash
+sudo dnf install gcc pkg-config openssl-devel
+git clone https://github.com/swadhingoswami/tuckdb.git
+cd tuckdb && cargo build --release
+```
+
+### macOS
+
+```bash
+# Install Rust + Xcode Command Line Tools
+xcode-select --install
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Clone and build
+git clone https://github.com/swadhingoswami/tuckdb.git
+cd tuckdb
+cargo build --release
+```
+
+### Windows
+
+```powershell
+# 1. Install Rust from https://rustup.rs
+# 2. Install Visual Studio Build Tools (or VS 2022) with "Desktop development with C++"
+# 3. Clone and build
+git clone https://github.com/swadhingoswami/tuckdb.git
+cd tuckdb
+cargo build --release
+```
+
+### Add to your Rust project
+
+```toml
+[dependencies]
+tuckdb = "0.1"
+
+# Optional features:
+# tuckdb = { version = "0.1", features = ["s3"] }    # S3 backend
+# tuckdb = { version = "0.1", features = ["capi"] }  # C API
+```
+
+### Build with different features
+
+```bash
+# Default (minimal): only zstd
+cargo build --release
+
+# With S3 backend
+cargo build --release --features s3
+
+# With C API (produces shared library)
+cargo build --release --features capi
+
+# All features
+cargo build --release --features s3,capi
+
+# Cross-compile for ARM (e.g., Raspberry Pi)
+rustup target add aarch64-unknown-linux-gnu
+cargo build --release --target aarch64-unknown-linux-gnu
+```
+
+### Run after install
+
+```bash
+# CLI tool
+cargo run --example cli -- info mytable --dir /tmp/db
+
+# Demo
+cargo run --release --example demo_app
+
+# All examples
+cargo run --release --example basic_operations
+cargo run --release --example time_series
+```
+
+---
+
 ## 🤔 Why another analytics library?
 
 > *"Today, getting analytics means: store data in S3 → convert to Parquet → run DuckDB → cache with Redis. That's 4 systems talking to each other. None of them co-designed."*
