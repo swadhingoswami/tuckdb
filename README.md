@@ -729,7 +729,7 @@ Backend Infrastructure · Virtualization · Trusted Computing
 
 I design and build **foundational infrastructure** — storage engines, backup systems, TPM security runtimes, and now TuckDB. Each project solves a real systems problem: performance, reliability, and clean architecture.
 
-📧 **gsmswadhin@gmail.com** |  💻 **[github.com/swadhingoswami](https://github.com/swadhingoswami)**
+📧 **gsmswadhin@gmail.com** |  💻 **[github.com/swadhingoswami](https://github.com/swadhingoswami) https://www.linkedin.com/in/swadhin-goswami/**
 
 > *Exploring Staff / Principal / Senior Software Engineer roles in systems infrastructure. If TuckDB or any of my projects resonate with your team's challenges, I'd love to chat.*
 
