@@ -471,149 +471,400 @@ Aggregate: hash GROUP BY → SUM/COUNT/AVG → result
 
 ---
 
-## 💡 Under the Hood
+## 💡 Under the Hood — Complete Walkthrough with emp Table
 
-### The `.tuck` File Format
+This section walks through the entire lifecycle of TuckDB using a concrete `emp` table example. Every state, every piece of metadata, every step explained.
 
-When `table.flush()` is called, TuckDB writes a single binary `.tuck` file. The layout:
+---
 
-```
-┌──────────────────────────────────┐
-│ Magic "TCKB" (4 bytes)          │  ← Identifies the file type
-├──────────────────────────────────┤
-│ Version (4 bytes)               │  ← Format version (currently 1)
-├──────────────────────────────────┤
-│ Schema length + Schema bytes    │  ← Column names, types, nullability
-├──────────────────────────────────┤
-│ Number of chunks (4 bytes)      │
-├──────────────────────────────────┤
-│ ChunkMeta[0]  (38+ bytes)       │
-│   col_idx: u32                  │
-│   chunk_idx: u32                │
-│   encoding_id: u16 (1-6)        │
-│   offset: u64 (byte position)   │  ← File offset of compressed data
-│   compressed_size: u64          │
-│   uncompressed_size: u64        │
-│   stats:                        │  ← Used for chunk skipping
-│     min: Option<f64>            │
-│     max: Option<f64>            │
-│     null_count: u64             │
-├──────────────────────────────────┤
-│ ChunkMeta[1] ...                │
-├──────────────────────────────────┤
-│ Chunk 0 Col 0 (compressed)      │
-│ Chunk 0 Col 1 (compressed)      │
-│ Chunk 1 Col 0 (compressed)      │
-│ ...                              │
-└──────────────────────────────────┘
-```
+### Step 1: Create table — No .tuck file yet
 
-**Code** (`src/storage/format.rs`):
+You call:
 ```rust
-// Write: encode each column, collect metadata, serialize
-for column in batch.columns {
-    let (encoding_id, compressed) = encoding::encode_column(&column.data);
-    let stats = encoding::column_stats(&column.data);
-    all_encoded.push((ChunkMeta { col_idx, chunk_idx, encoding_id,
-        offset, compressed_size, uncompressed_size, stats }, compressed));
-}
-
-// Binary layout: header → metadata → data at computed offsets
-output.extend_from_slice(MAGIC);           // "TCKB"
-output.extend_from_slice(&VERSION_BYTES);   // version
-output.extend_from_slice(&schema_bytes);    // schema
-output.extend_from_slice(&meta_bytes);      // ChunkMeta[]
-output.extend_from_slice(&compressed_data); // actual data
+let schema = Schema::new(vec![
+    Field::new("empid",   DataType::Int64, false),
+    Field::new("empname", DataType::Utf8,  false),
+    Field::new("empaddr", DataType::Utf8,  false),
+    Field::new("empsal",  DataType::Int64, true),
+]);
+let mut table = Table::create("emp", schema, "/tmp/db");
 ```
 
-Each column of each batch (chunk) is compressed independently. The metadata section stores exact byte offsets — the reader jumps directly to any chunk without scanning.
+**Memory state:**
+```
+Table "emp"
+├── schema: [empid:Int64, empname:Utf8, empaddr:Utf8, empsal:Int64]
+├── batches: []                  ← empty, no data yet
+├── data_version: 0              ← no changes yet
+├── result_cache: {}             ← empty
+└── .tuck file: DOES NOT EXIST   ← nothing on disk
+```
 
-### How Chunks Are Stored
+---
 
-Every `insert_batch()` call creates one chunk in memory. When `flush()` is called:
-
-1. Each column is compressed with the best encoding for its type
-2. Column stats (min, max, null_count) are computed
-3. All chunks are serialized into one `.tuck` file
-
-On `Table::open()`, the file is read and decoded back into `Vec<RecordBatch>`:
+### Step 2: Insert batch 1 (3 employees) — All in memory, .tuck untouched
 
 ```rust
-// Read header (just schema + metadata — fast)
-let (schema, chunks) = BlobReader::read_header(&bytes);
-
-// Read data: for each chunk → decode each column
-for meta in &chunks {
-    let raw = &bytes[meta.offset..meta.offset + meta.compressed_size];
-    let decoded = encoding::decode_column(meta.encoding, raw, meta.uncompressed_size);
-    columns.push(Column::new(field, decoded));
-}
+let batch1 = RecordBatch::new(schema, vec![
+    Column::new(f_empid,   ColumnData::Int64(  vec![101, 102, 103])),
+    Column::new(f_empname, ColumnData::Utf8(   vec!["Alice", "Bob", "Charlie"])),
+    Column::new(f_empaddr, ColumnData::Utf8(   vec!["Mumbai", "Delhi", "Bangalore"])),
+    Column::new(f_empsal,  ColumnData::Int64(  vec![25000, 18000, 45000])),
+]);
+table.insert_batch(batch1);
 ```
 
-### Chunk-Level Filter Skipping (The Core Trick)
-
-When you query with `WHERE temp > 100`, the `FileScan` operator checks each chunk **before** decompressing it:
-
+**Memory state after insert:**
 ```
-For each chunk:
-  Read ChunkMeta (38 bytes): temp min=50, max=80
-  → "Can temp > 100 match in range [50, 80]?"
-  → max(80) > 100? NO → SKIP (zero bytes decompressed)
-
-Next chunk: temp min=90, max=150
-  → "Can temp > 100 match in range [90, 150]?"
-  → max(150) > 100? YES → Read + decompress + filter
+Table "emp"
+├── schema: [empid:Int64, empname:Utf8, empaddr:Utf8, empsal:Int64]
+├── batches: [
+│     batch 0 (chunk 0): RecordBatch {
+│       num_rows: 3,
+│       columns: [
+│         empid:   Int64(  [101, 102, 103] ),     ← Vec<i64> raw
+│         empname: Utf8(   ["Alice","Bob","Charlie"] ), ← Vec<String> raw
+│         empaddr: Utf8(   ["Mumbai","Delhi","Bangalore"] ), ← Vec<String> raw
+│         empsal:  Int64(  [25000, 18000, 45000] ), ← Vec<i64> raw
+│       ]
+│     }
+│   ]
+├── data_version: 1              ← incremented from 0
+├── result_cache: {}             ← cleared (was already empty)
+└── .tuck file: DOES NOT EXIST   ← still no file on disk
 ```
 
-**Code** (`src/exec/physical_plan.rs:430-446`):
+**Key points:**
+- Data is stored column-wise: all empids together (`Vec<i64>`), all empnames together (`Vec<String>`)
+- Each column type has its own Vec type — no row objects, no boxing
+- **Zero compression, zero disk I/O** — just appends to an in-memory vector
+- `data_version` went from 0 → 1 (tracks data freshness)
+- The `.tuck` file on disk doesn't exist yet
+
+---
+
+### Step 3: Insert batch 2 (2 more employees) — Second chunk in memory
+
 ```rust
-if let Some(ref pred) = self.filter {
-    let ref_cols = referenced_columns(pred);
-    for col_name in &ref_cols {
-        if let (Some(min), Some(max)) = (meta.stats.min, meta.stats.max)
-            && !could_match(pred, col_name, min, max)
-        {
-            can_skip = true;
-            break;  // ← Skip entire chunk, no bytes read
-        }
-    }
-    if can_skip { continue; }  // ← Zero decompression for this chunk
-}
+let batch2 = RecordBatch::new(schema, vec![
+    Column::new(f_empid,   ColumnData::Int64(  vec![104, 105])),
+    Column::new(f_empname, ColumnData::Utf8(   vec!["Diana", "Eve"])),
+    Column::new(f_empaddr, ColumnData::Utf8(   vec!["Pune", "Mumbai"])),
+    Column::new(f_empsal,  ColumnData::Int64(  vec![55000, 32000])),
+]);
+table.insert_batch(batch2);
 ```
 
-**The `could_match()` logic** (`src/exec/expr.rs:188-201`):
-
-| Expression | Range Check | Example |
-|-----------|-------------|---------|
-| `col > X` | `max > X` | `min=10, max=25` on `age > 30` → skip |
-| `col >= X` | `max >= X` | `min=10, max=25` on `age >= 30` → skip |
-| `col < X` | `min < X` | `min=60, max=80` on `age < 50` → skip |
-| `col <= X` | `min <= X` | `min=60, max=80` on `age <= 50` → skip |
-| `col = X` | `min ≤ X ≤ max` | `min=1, max=3` on `status = 5` → skip |
-| `A AND B` | both must pass | Both sides must be possible |
-| `A OR B` | either passes | At least one side possible |
-
-For selective filters: **50-90% of chunks skipped** with zero decompression cost.
-
-### UTF-8 Compression (Dictionary + ZSTD)
-
-TuckDB uses a two-stage approach for text (`src/storage/encoding/utf8.rs`):
-
-**Stage 1 — Build dictionary**: Collect unique strings; each gets an integer index.
+**Memory state after second insert:**
 ```
-Input:   ["New York", "London", "New York", "Tokyo", "London", "New York"]
-             ↓
-Dictionary: ["New York"(0), "London"(1), "Tokyo"(2)]   ← strings stored once
-Indices:   [0, 1, 0, 2, 1, 0]                           ← each 1-2 bytes as varint
+Table "emp"
+├── batches: [
+│     batch 0 (chunk 0): { num_rows:3, empid:[101,102,103], empname:["Alice","Bob","Charlie"],
+│                           empaddr:["Mumbai","Delhi","Bangalore"], empsal:[25000,18000,45000] },
+│     batch 1 (chunk 1): { num_rows:2, empid:[104,105], empname:["Diana","Eve"],
+│                           empaddr:["Pune","Mumbai"], empsal:[55000,32000] },
+│   ]
+├── data_version: 2              ← incremented again
+├── result_cache: {}             ← cleared again
+└── .tuck file: DOES NOT EXIST
 ```
 
-**Stage 2 — ZSTD compress**: The serialized dictionary + index array is compressed with Zstandard (level 3).
+**Each batch is a separate chunk. No merging, no sorting, no rebalancing.**
 
-**Why 5-20x compression**:
-- Row format: "New York" stored 3 times = ~27 bytes  
-- Dictionary: "New York" stored once (9 bytes) + index (1 byte × 3) = 12 bytes  
-- After ZSTD: repeated index 0, 0 compresses to nearly zero → ~9 bytes total  
-- **Extreme case**: 1M rows of "USA" → 1KB dict + 1MB indices → ZSTD sees 1M zeros of index → **~100x** in practice
+---
+
+### Step 4: Query before flush — Reads from memory
+
+```rust
+let plan = LogicalPlan::scan("emp")
+    .filter(col("empsal").gt(lit_int(30000)))
+    .project(&["empname", "empsal"]);
+let result = table.execute(plan);
+```
+
+**What happens inside:**
+
+1. **Optimizer** rewrites plan: pushes `empsal > 30000` and `projection [empname, empsal]` into the Scan node.
+
+2. **Chunk skipping on in-memory data**: For each batch, compute stats on the fly by scanning the raw Vec:
+
+   ```
+   Batch 0: empsal = [25000, 18000, 45000]
+     → min=18000, max=45000  (computed by scanning 3 values)
+     → "Can empsal > 30000 match in range [18000, 45000]?"
+     → max(45000) > 30000? YES → keep batch, decode (no-op, already raw)
+
+   Batch 1: empsal = [55000, 32000]
+     → min=32000, max=55000  (computed by scanning 2 values)
+     → "Can empsal > 30000 match in range [32000, 55000]?"
+     → max(55000) > 30000? YES → keep batch, decode
+   ```
+
+3. **Row-level filter** applied to each batch:
+   ```
+   Batch 0: mask = [25000>30000? No, 18000>30000? No, 45000>30000? Yes]
+            → filtered: empname=["Charlie"], empsal=[45000]
+
+   Batch 1: mask = [55000>30000? Yes, 32000>30000? Yes]
+            → filtered: empname=["Diana","Eve"], empsal=[55000,32000]
+   ```
+
+4. **Projection**: Keep only empname and empsal columns.
+
+5. **Result**: Charlie(45000), Diana(55000), Eve(32000)
+
+**No .tuck file is read. Everything comes from the in-memory Vecs.**
+
+---
+
+### Step 5: Flush — Compress everything, write .tuck file
+
+```rust
+table.flush();
+```
+
+This is where the real work happens. Let's trace every internal step.
+
+#### Step 5a: Encode each column of each chunk
+
+For every (batch, column), pick the best encoder and compress:
+
+```
+Batch 0, empid:   [101, 102, 103]    → Delta+Varint → [101, +1, +1] → 3 bytes
+Batch 0, empname: ["Alice","Bob","Charlie"] → Dict+ZSTD → ~45 bytes
+Batch 0, empaddr: ["Mumbai","Delhi","Bangalore"] → Dict+ZSTD → ~50 bytes
+Batch 0, empsal:  [25000, 18000, 45000] → Delta+Varint → [25000, -7000, +27000] → 6 bytes
+
+Batch 1, empid:   [104, 105]         → Delta+Varint → [104, +1] → 2 bytes
+Batch 1, empname: ["Diana","Eve"]    → Dict+ZSTD → ~35 bytes
+Batch 1, empaddr: ["Pune","Mumbai"]  → Dict+ZSTD → ~38 bytes
+Batch 1, empsal:  [55000, 32000]     → Delta+Varint → [55000, -23000] → 4 bytes
+```
+
+#### Step 5b: Compute column stats for each chunk
+
+For each compressed column, compute the min, max, null_count:
+
+```
+Batch 0:
+  empid:   min=101,  max=103,  nulls=0
+  empname: min=None, max=None, nulls=0   ← Utf8 has NO string stats
+  empaddr: min=None, max=None, nulls=0   ← Utf8 has NO string stats
+  empsal:  min=18000, max=45000, nulls=0
+
+Batch 1:
+  empid:   min=104,  max=105,  nulls=0
+  empname: min=None, max=None, nulls=0
+  empaddr: min=None, max=None, nulls=0
+  empsal:  min=32000, max=55000, nulls=0
+```
+
+#### Step 5c: Build ChunkMeta records
+
+For each (batch_idx, col_idx), create one ChunkMeta with encoding, sizes, offset, stats:
+
+```
+Total compressed data size = 3 + 45 + 50 + 6 + 2 + 35 + 38 + 4 = 183 bytes
+Header size (schema + all ChunkMeta) ≈ 44 + (8 × 38) ≈ 348 bytes
+Data starts at offset 348
+
+ChunkMeta[0]: col=0(empid),   chunk=0, enc=1(Delta),   offset=348, comp=3,  uncompr=3, min=101,   max=103
+ChunkMeta[1]: col=1(empname), chunk=0, enc=3(DictZstd), offset=351, comp=45, uncompr=3, min=None,  max=None
+ChunkMeta[2]: col=2(empaddr), chunk=0, enc=3(DictZstd), offset=396, comp=50, uncompr=3, min=None,  max=None
+ChunkMeta[3]: col=3(empsal),  chunk=0, enc=1(Delta),   offset=446, comp=6,  uncompr=3, min=18000, max=45000
+ChunkMeta[4]: col=0(empid),   chunk=1, enc=1(Delta),   offset=452, comp=2,  uncompr=2, min=104,   max=105
+ChunkMeta[5]: col=1(empname), chunk=1, enc=3(DictZstd), offset=454, comp=35, uncompr=2, min=None,  max=None
+ChunkMeta[6]: col=2(empaddr), chunk=1, enc=3(DictZstd), offset=489, comp=38, uncompr=2, min=None,  max=None
+ChunkMeta[7]: col=3(empsal),  chunk=1, enc=1(Delta),   offset=527, comp=4,  uncompr=2, min=32000, max=55000
+```
+
+**The offset is calculated**: offset = header_size + sum of all previous chunks' compressed sizes. This lets the reader jump directly to any chunk by seeking to `meta.offset`.
+
+#### Step 5d: Write the .tuck file
+
+The complete binary file on disk:
+
+```
+emp.tuck  (approx 531 bytes)
+┌────────────────────────────────────────────────────────────────────┐
+│ 0-3:   Magic "TCKB"                                                │
+│ 4-7:   Version = 1                                                 │
+│ 8-11:  Schema length = 44                                          │
+│ 12-55: Schema bytes → [empid:Int64, empname:Utf8, empaddr:Utf8,   │
+│                         empsal:Int64]                               │
+│ 56-59: Number of chunk metas = 8                                   │
+│ 60-97: ChunkMeta[0] → empid chunk0, offset=348, comp=3,  min=101  │
+│ 98-135: ChunkMeta[1] → empname chunk0, offset=351, comp=45        │
+│ 136-173: ChunkMeta[2] → empaddr chunk0, offset=396, comp=50       │
+│ 174-211: ChunkMeta[3] → empsal chunk0, offset=446, comp=6,  max=45000 │
+│ 212-249: ChunkMeta[4] → empid chunk1, offset=452, comp=2,  min=104   │
+│ 250-287: ChunkMeta[5] → empname chunk1, offset=454, comp=35       │
+│ 288-325: ChunkMeta[6] → empaddr chunk1, offset=489, comp=38       │
+│ 326-363: ChunkMeta[7] → empsal chunk1, offset=527, comp=4,  max=55000 │
+│ 364-366: Chunk 0 empid compressed [3 bytes]                        │
+│ 367-411: Chunk 0 empname compressed [45 bytes]                     │
+│ 412-461: Chunk 0 empaddr compressed [50 bytes]                     │
+│ 462-467: Chunk 0 empsal compressed [6 bytes]                       │
+│ 468-469: Chunk 1 empid compressed [2 bytes]                        │
+│ 470-504: Chunk 1 empname compressed [35 bytes]                     │
+│ 505-542: Chunk 1 empaddr compressed [38 bytes]                     │
+│ 543-546: Chunk 1 empsal compressed [4 bytes]                       │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**ChunkMeta stores offset values that point into the data section.** For example, ChunkMeta[0] says: "empid data for chunk 0 starts at byte 348, it's 3 bytes long." At byte 348 you find the compressed Delta+Varint encoding of [101, 102, 103].
+
+#### Step 5e: Update in-memory state after flush
+
+```
+Table "emp"
+├── batches: [batch0, batch1]     ← still exists unchanged in memory
+├── persisted: true               ← new flag set
+├── blob_bytes: Some(531 bytes)   ← entire .tuck file kept in memory too
+├── data_version: 2               ← unchanged (no new insert)
+└── .tuck file: EXISTS at /tmp/db/emp.tuck (531 bytes)
+```
+
+**Data is now duplicated** — the raw `Vec`s in memory AND the compressed bytes in `blob_bytes`. This is intentional: queries before the next insert can use either source.
+
+---
+
+### Step 6: Query after flush — Chunk skipping with stored metadata
+
+```rust
+let plan = LogicalPlan::scan("emp")
+    .filter(col("empsal").gt(lit_int(30000)))
+    .project(&["empname", "empsal"]);
+let result = table.execute(plan);
+```
+
+This time the engine sees `persisted=true` and uses **FileScan** instead of in-memory scan:
+
+1. **Parse header** — Read the first ~363 bytes of `blob_bytes`, extract schema and all 8 ChunkMeta records.
+
+2. **Chunk skipping using stored min/max** (not computed on the fly):
+
+   ```
+   ChunkMeta[3]: empsal, chunk=0, min=18000, max=45000
+     → "Can empsal > 30000 match in [18000, 45000]?"
+     → max(45000) > 30000? YES → read compressed data at offset 446 (6 bytes)
+     → Delta+Varint decode → [25000, 18000, 45000]
+     → Row filter: 25000>30000? No, 18000>30000? No, 45000>30000? Yes
+     → Keep: empname="Charlie", empsal=45000
+
+   ChunkMeta[7]: empsal, chunk=1, min=32000, max=55000
+     → "Can empsal > 30000 match in [32000, 55000]?"
+     → max(55000) > 30000? YES → read compressed data at offset 527 (4 bytes)
+     → Delta+Varint decode → [55000, 32000]
+     → Row filter: 55000>30000? Yes, 32000>30000? Yes
+     → Keep: empname="Diana", empsal=55000 / empname="Eve", empsal=32000
+   ```
+
+3. **Project** — Keep only empname and empsal.
+
+4. **DataCache** — Decoded chunks are inserted into the LRU cache for future queries.
+
+**Same result as before flush, but now decompression happened. The benefit of chunk skipping shows when chunks CAN be skipped.**
+
+---
+
+### Step 7: Query that BENEFITS from chunk skipping
+
+```rust
+let plan = LogicalPlan::scan("emp")
+    .filter(col("empsal").gt(lit_int(50000)))
+    .project(&["empname", "empsal"]);
+let result = table.execute(plan);
+```
+
+```
+ChunkMeta[3]: empsal, chunk=0, min=18000, max=45000
+  → "Can empsal > 50000 match in [18000, 45000]?"
+  → max(45000) > 50000? NO → SKIP 🚫
+  → Zero bytes read from data section. Zero decompression.
+
+ChunkMeta[7]: empsal, chunk=1, min=32000, max=55000
+  → "Can empsal > 50000 match in [32000, 55000]?"
+  → max(55000) > 50000? YES → read offset 527 (4 bytes), decode → [55000, 32000]
+  → Row filter: 55000>50000? Yes, 32000>50000? No
+  → Keep: empname="Diana", empsal=55000
+```
+
+**Chunk 0 was skipped entirely by reading just 38 bytes of metadata. No decompression of empid, empname, empaddr, or empsal for that chunk.**
+
+---
+
+### Step 8: Insert after flush — New data in memory, .tuck now stale
+
+```rust
+let batch3 = RecordBatch::new(schema, vec![
+    Column::new(f_empid,   ColumnData::Int64(  vec![106])),
+    Column::new(f_empname, ColumnData::Utf8(   vec!["Frank"])),
+    Column::new(f_empaddr, ColumnData::Utf8(   vec!["Chennai"])),
+    Column::new(f_empsal,  ColumnData::Int64(  vec![15000])),
+]);
+table.insert_batch(batch3);
+```
+
+**Memory state:**
+```
+Table "emp"
+├── batches: [
+│     batch 0 (chunk 0): 3 rows (Alice, Bob, Charlie)   ← from before flush
+│     batch 1 (chunk 1): 2 rows (Diana, Eve)             ← from before flush
+│     batch 2 (chunk 2): 1 row  (Frank)                  ← NEW, only in memory
+│   ]
+├── data_version: 3              ← incremented
+├── persisted: true              ← still true, but .tuck is now STALE
+├── blob_bytes: Some(...)        ← old .tuck (only chunks 0 & 1)
+└── .tuck file: emp.tuck         ← still has only chunks 0 & 1. Frank is NOT in it.
+```
+
+**The .tuck file on disk is now outdated.** It has 5 rows (chunks 0+1), but the table has 6 rows (chunks 0+1+2). Frank only exists in memory.
+
+**Current limitation**: The query engine reads from the .tuck file (chunks 0+1) and ignores the in-memory batch 2 (Frank). Calling `flush()` again rewrites the complete .tuck file with all 3 chunks.
+
+---
+
+### Step 9: Flush again — Rewrite complete .tuck
+
+```rust
+table.flush();
+```
+
+1. All 3 batches (old chunks 0+1 + new chunk 2) are compressed together
+2. New ChunkMeta records are built for all 3 × 4 = 12 column-chunks
+3. Complete .tuck file is rewritten — now 6 rows, 3 chunks
+
+```
+emp.tuck (rewritten)
+├── Schema: [empid, empname, empaddr, empsal]
+├── ChunkMeta[0..3]: chunk 0 metadata (unchanged min/max)
+├── ChunkMeta[4..7]: chunk 1 metadata (unchanged min/max)
+├── ChunkMeta[8..11]: chunk 2 metadata → empsal min=15000, max=15000
+└── Compressed data: chunk 0 cols + chunk 1 cols + chunk 2 cols
+```
+
+**Now the file has all 6 rows. The in-memory and on-disk state are in sync again.**
+
+---
+
+### Summary: What's in the .tuck file at each stage
+
+| State | .tuck file exists? | Contains | Metadata in .tuck |
+|-------|-------------------|----------|-------------------|
+| After `create()` | No | — | — |
+| After `insert()` | No | — | — |
+| After `flush()` | **Yes** | All inserted chunks, compressed | Schema + ChunkMeta[] with min/max/offsets |
+| After more `insert()` | Yes (but stale) | Old chunks only | Stale metadata (missing new chunks) |
+| After 2nd `flush()` | **Yes** (rewritten) | All chunks old+new | Updated ChunkMeta[] with new chunks |
+
+**Key design takeaways:**
+- **No incremental writes.** The entire .tuck file is written from scratch on every flush.
+- **No separate metadata file.** Schema, ChunkMeta, and compressed data live in one binary.
+- **Metadata grows linearly** with (chunks × columns). Each ChunkMeta is ~38 bytes.
+- **Chunk skipping** works on numeric columns (Int64, Float64, Timestamp) using stored min/max. String columns (Utf8) store `min=None, max=None` and cannot skip chunks.
+- **Data is duplicated** between memory and .tuck file after flush until next insert.
 
 ---
 
