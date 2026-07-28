@@ -471,6 +471,152 @@ Aggregate: hash GROUP BY → SUM/COUNT/AVG → result
 
 ---
 
+## 💡 Under the Hood
+
+### The `.tuck` File Format
+
+When `table.flush()` is called, TuckDB writes a single binary `.tuck` file. The layout:
+
+```
+┌──────────────────────────────────┐
+│ Magic "TCKB" (4 bytes)          │  ← Identifies the file type
+├──────────────────────────────────┤
+│ Version (4 bytes)               │  ← Format version (currently 1)
+├──────────────────────────────────┤
+│ Schema length + Schema bytes    │  ← Column names, types, nullability
+├──────────────────────────────────┤
+│ Number of chunks (4 bytes)      │
+├──────────────────────────────────┤
+│ ChunkMeta[0]  (38+ bytes)       │
+│   col_idx: u32                  │
+│   chunk_idx: u32                │
+│   encoding_id: u16 (1-6)        │
+│   offset: u64 (byte position)   │  ← File offset of compressed data
+│   compressed_size: u64          │
+│   uncompressed_size: u64        │
+│   stats:                        │  ← Used for chunk skipping
+│     min: Option<f64>            │
+│     max: Option<f64>            │
+│     null_count: u64             │
+├──────────────────────────────────┤
+│ ChunkMeta[1] ...                │
+├──────────────────────────────────┤
+│ Chunk 0 Col 0 (compressed)      │
+│ Chunk 0 Col 1 (compressed)      │
+│ Chunk 1 Col 0 (compressed)      │
+│ ...                              │
+└──────────────────────────────────┘
+```
+
+**Code** (`src/storage/format.rs`):
+```rust
+// Write: encode each column, collect metadata, serialize
+for column in batch.columns {
+    let (encoding_id, compressed) = encoding::encode_column(&column.data);
+    let stats = encoding::column_stats(&column.data);
+    all_encoded.push((ChunkMeta { col_idx, chunk_idx, encoding_id,
+        offset, compressed_size, uncompressed_size, stats }, compressed));
+}
+
+// Binary layout: header → metadata → data at computed offsets
+output.extend_from_slice(MAGIC);           // "TCKB"
+output.extend_from_slice(&VERSION_BYTES);   // version
+output.extend_from_slice(&schema_bytes);    // schema
+output.extend_from_slice(&meta_bytes);      // ChunkMeta[]
+output.extend_from_slice(&compressed_data); // actual data
+```
+
+Each column of each batch (chunk) is compressed independently. The metadata section stores exact byte offsets — the reader jumps directly to any chunk without scanning.
+
+### How Chunks Are Stored
+
+Every `insert_batch()` call creates one chunk in memory. When `flush()` is called:
+
+1. Each column is compressed with the best encoding for its type
+2. Column stats (min, max, null_count) are computed
+3. All chunks are serialized into one `.tuck` file
+
+On `Table::open()`, the file is read and decoded back into `Vec<RecordBatch>`:
+
+```rust
+// Read header (just schema + metadata — fast)
+let (schema, chunks) = BlobReader::read_header(&bytes);
+
+// Read data: for each chunk → decode each column
+for meta in &chunks {
+    let raw = &bytes[meta.offset..meta.offset + meta.compressed_size];
+    let decoded = encoding::decode_column(meta.encoding, raw, meta.uncompressed_size);
+    columns.push(Column::new(field, decoded));
+}
+```
+
+### Chunk-Level Filter Skipping (The Core Trick)
+
+When you query with `WHERE temp > 100`, the `FileScan` operator checks each chunk **before** decompressing it:
+
+```
+For each chunk:
+  Read ChunkMeta (38 bytes): temp min=50, max=80
+  → "Can temp > 100 match in range [50, 80]?"
+  → max(80) > 100? NO → SKIP (zero bytes decompressed)
+
+Next chunk: temp min=90, max=150
+  → "Can temp > 100 match in range [90, 150]?"
+  → max(150) > 100? YES → Read + decompress + filter
+```
+
+**Code** (`src/exec/physical_plan.rs:430-446`):
+```rust
+if let Some(ref pred) = self.filter {
+    let ref_cols = referenced_columns(pred);
+    for col_name in &ref_cols {
+        if let (Some(min), Some(max)) = (meta.stats.min, meta.stats.max)
+            && !could_match(pred, col_name, min, max)
+        {
+            can_skip = true;
+            break;  // ← Skip entire chunk, no bytes read
+        }
+    }
+    if can_skip { continue; }  // ← Zero decompression for this chunk
+}
+```
+
+**The `could_match()` logic** (`src/exec/expr.rs:188-201`):
+
+| Expression | Range Check | Example |
+|-----------|-------------|---------|
+| `col > X` | `max > X` | `min=10, max=25` on `age > 30` → skip |
+| `col >= X` | `max >= X` | `min=10, max=25` on `age >= 30` → skip |
+| `col < X` | `min < X` | `min=60, max=80` on `age < 50` → skip |
+| `col <= X` | `min <= X` | `min=60, max=80` on `age <= 50` → skip |
+| `col = X` | `min ≤ X ≤ max` | `min=1, max=3` on `status = 5` → skip |
+| `A AND B` | both must pass | Both sides must be possible |
+| `A OR B` | either passes | At least one side possible |
+
+For selective filters: **50-90% of chunks skipped** with zero decompression cost.
+
+### UTF-8 Compression (Dictionary + ZSTD)
+
+TuckDB uses a two-stage approach for text (`src/storage/encoding/utf8.rs`):
+
+**Stage 1 — Build dictionary**: Collect unique strings; each gets an integer index.
+```
+Input:   ["New York", "London", "New York", "Tokyo", "London", "New York"]
+             ↓
+Dictionary: ["New York"(0), "London"(1), "Tokyo"(2)]   ← strings stored once
+Indices:   [0, 1, 0, 2, 1, 0]                           ← each 1-2 bytes as varint
+```
+
+**Stage 2 — ZSTD compress**: The serialized dictionary + index array is compressed with Zstandard (level 3).
+
+**Why 5-20x compression**:
+- Row format: "New York" stored 3 times = ~27 bytes  
+- Dictionary: "New York" stored once (9 bytes) + index (1 byte × 3) = 12 bytes  
+- After ZSTD: repeated index 0, 0 compresses to nearly zero → ~9 bytes total  
+- **Extreme case**: 1M rows of "USA" → 1KB dict + 1MB indices → ZSTD sees 1M zeros of index → **~100x** in practice
+
+---
+
 ## ⚡ Performance
 
 | Encoding | Type | Throughput (encode) | Ratio |
