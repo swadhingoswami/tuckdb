@@ -853,6 +853,195 @@ AggOp::Min    AggOp::Max
 
 ---
 
+## ❓ Design FAQ
+
+### How is data stored per table?
+
+Each table gets its own `.tuck` file. `employees` → `employees.tuck`, `orders` → `orders.tuck`. No shared files, no catalog. The file is fully self-contained — copy it anywhere and open it directly.
+
+### What's inside a .tuck file?
+
+Everything is in one binary file — no separate metadata, no sidecar files:
+
+```
+.tuck file
+├── Magic "TCKB" (identifies the format)
+├── Version number
+├── Schema (column names, types, nullability)
+├── ChunkMeta[] — metadata for every column of every chunk:
+│   col_idx, chunk_idx, encoding_id, offset, compressed_size,
+│   uncompressed_size, min_value, max_value, null_count
+└── Compressed data (actual column values)
+```
+
+### How does insert_batch() work?
+
+Every `insert_batch()` call:
+1. Appends the batch to an **in-memory list** — no disk I/O, no compression
+2. Increments an internal version counter (tracks data freshness for cache)
+3. Clears the result cache
+
+**The .tuck file is NOT touched during insert.** Compression only happens on `flush()`.
+
+### How are column values stored in memory?
+
+Each column is stored as its own typed vector — not as rows:
+
+- `Int64` → `Vec<i64>` — contiguous 8-byte integers
+- `Float64` → `Vec<f64>` — contiguous 8-byte floats
+- `Utf8` → `Vec<String>` — contiguous heap-allocated strings
+- `Timestamp` → `Vec<i64>` — contiguous 8-byte integers
+
+This is the columnar layout. All empid values are together, all empname values are together. This enables type-specific compression (Delta+Varint on ints, Dict+ZSTD on strings).
+
+### What is a "chunk"?
+
+Each batch you insert becomes **one chunk**. Batch N = Chunk N. No splitting, no merging, no rebalancing. A chunk with 1 row is stored the same way as a chunk with 1M rows — just with different sizes.
+
+### How does flush() work?
+
+1. Every column of every batch is compressed using its type's encoding (Delta+Varint for ints, XOR for floats, Dict+ZSTD for strings)
+2. Column stats (min, max, null_count) are computed per chunk
+3. ChunkMeta records are built with byte offsets, sizes, encoding IDs, and stats
+4. The entire .tuck file is assembled: header → metadata → compressed data
+5. The file is written to disk in one shot
+
+**The entire file is rewritten on every flush.** No append, no in-place update. This is by design — you batch your inserts and call flush once.
+
+### Does flush() happen automatically?
+
+**No.** You must explicitly call `table.flush()`. There is no auto-flush, no periodic sync. You control when compression happens.
+
+### How does chunk skipping work?
+
+When querying with a filter like `WHERE salary > 50000`:
+
+1. Read all ChunkMeta for the salary column (38 bytes each, ~300 bytes for 8 chunks)
+2. For each chunk, check: "Does the filter match this chunk's [min, max] range?"
+   - `col > X` → chunk passes if `max > X`
+   - `col < X` → chunk passes if `min < X`
+   - `col = X` → chunk passes if `min ≤ X ≤ max`
+   - `A AND B` → both must pass
+   - `A OR B` → either must pass
+3. Chunks that can't match → **skipped, zero decompression**
+4. Chunks that could match → read compressed data at recorded offset, decompress, filter rows
+
+For selective filters on **sorted or ordered data**: 50-90% of chunks skipped.
+
+### What types support chunk skipping?
+
+Only **numeric types** (Int64, Float64, Timestamp) store min/max in ChunkMeta. **Utf8 (string) columns store min=None, max=None** — so string filters like `WHERE name = "swadhin"` or `WHERE address > "M"` cannot skip chunks. Every string chunk must be decompressed and scanned.
+
+**Future**: Lexicographic min/max for strings, bloom filters for equality checks.
+
+### How row count is maintained?
+
+Each batch tracks its own row count. The table's total is the sum of all batch row counts. Row count is NOT stored explicitly in the .tuck file — it's recomputed by summing `uncompressed_size` from each chunk's metadata.
+
+### Can I query before flush?
+
+Yes. Before flush, the query engine reads from the in-memory `Vec<RecordBatch>`. Chunk skipping still works — stats are computed on the fly by scanning the raw Vec. After flush, the engine reads from the .tuck file in memory and uses the stored ChunkMeta for skipping.
+
+### What happens if I insert after flush?
+
+New batches are appended to the in-memory list. The .tuck file on disk is now stale — it doesn't include the new data. You must call `flush()` again to rewrite the .tuck file with all data (old + new).
+
+**Limitation**: The current query engine after flush reads only from the .tuck file, ignoring any unflushed in-memory batches. **Future**: Merge operator that unions persisted and in-memory data so queries always see everything.
+
+### How do Min/Max aggregation queries work?
+
+There is no global min/max pre-computed. `SELECT MIN(salary)` scans the ChunkMeta for all salary chunks, takes the smallest min:
+
+```
+Chunk 0 salary: min=5000
+Chunk 1 salary: min=30000
+Chunk 2 salary: min=2000
+→ Global min = 2000 (from metadata only, no decompression)
+```
+
+`SELECT AVG(salary)` or `COUNT(*) WHERE salary > X` requires decompressing matching chunks and scanning rows.
+
+### Why can't strings skip chunks?
+
+The ChunkMeta min/max fields store `f64` (64-bit float). Strings are not converted to f64 for stats. This is a known limitation. Future versions could store string min/max as byte-ordered binary (lexicographic comparison).
+
+### What's with the offset in ChunkMeta?
+
+The `offset` field stores the exact byte position in the .tuck file where each compressed chunk starts. This enables:
+- **Random access**: Jump to any chunk without scanning
+- **S3 range requests**: Request only the bytes you need via HTTP Range headers
+- **Zero-copy reads**: Read the exact byte range into memory
+
+### How many files does TuckDB create?
+
+One `.tuck` file per table, plus the application itself. No WAL, no temp files, no lock files, no schema registry. The output directory contains only the `.tuck` files.
+
+---
+
+## 🔮 What's NOT There — Limitations & Future Scope
+
+### Storage & File Format
+
+| Missing | Why | Future |
+|---------|-----|--------|
+| Incremental append to .tuck | Entire file rewritten on every flush | Append-only format — new chunks appended, metadata updated at end |
+| Multi-table blobs | One .tuck per table | Multi-table format with table directory in header |
+| Checksums per chunk | No corruption detection | CRC32 per compressed chunk |
+| Lazy loading from file | Entire file read into memory on open | Read chunks on demand, keep compressed file as primary store |
+| Concurrent writers | No write-ahead log, no locking | WAL for crash-safe inserts |
+| Delete / Update | Not supported | Row-level delete tombstones + compaction |
+
+### Compression
+
+| Missing | Why | Future |
+|---------|-----|--------|
+| String min/max stats | Stats store f64 only | Lexicographic string range for chunk skipping on text |
+| Adaptive encoding selection | Currently hardcoded per type | Sample data → pick best encoder per chunk (e.g., RLE for runs, Delta for monotonic, Bitmap for 0/1) |
+| Float compression beyond XOR | Bit-level only | FPC (FPC algorithm), ZSTD for floats |
+| String encoding variety | Dictionary+ZSTD only | Plain unencoded (fast), FSST (string substition), Delta on string prefixes |
+| Per-chunk encoding choice | Same encoding for all chunks of a type | Analyze each chunk separately, choose optimal encoding |
+
+### Query Engine
+
+| Missing | Why | Future |
+|---------|-----|--------|
+| ORDER BY / LIMIT | Not implemented | Sort operator with top-K optimization |
+| JOINs | Not implemented | Hash join, nested loop join, bloom filter probe-side skipping |
+| Subqueries / CTEs / Window functions | SQL parser doesn't support | Full SQL-92 support |
+| Parallel query execution | Single-threaded Volcano model | Operator-level parallelism (rayon), partition chunks across threads |
+| Streaming query results | Collects all batches first | Streaming ResultSet for large datasets |
+| Merge unflushed + persisted data | Queries either memory or .tuck | Union operator combining both sources |
+
+### Caching & Memory
+
+| Missing | Why | Future |
+|---------|-----|--------|
+| Result cache persistence | In-memory only, lost on restart | Disk-backed result cache for warm restart |
+| Cache admission policy | Insert on every decode | Cost-based admission (skip caching large low-value chunks) |
+| Memory-mapped file access | Entire file in Vec<u8> | mmap for lazy page-in from OS |
+
+### Concurrency
+
+| Missing | Why | Future |
+|---------|-----|--------|
+| Thread-safe table access | Single-threaded (C API has Mutex) | `Arc<RwLock<Table>>` for concurrent readers |
+| Async / non-blocking I/O | Synchronous read/write | tokio-based async backend for non-blocking S3/disk |
+| Multi-process sharing | No file-level locking | Advisory locks, version-based conflict detection |
+
+### Performance Optimizations (What's next)
+
+| Optimization | Expected Gain | Complexity |
+|-------------|---------------|------------|
+| SIMD decode for Delta+Varint | 3-5x faster decode | Low |
+| Sort on flush for tight chunk ranges | 5-10x more chunks skipped | Medium |
+| Bloom filters for equality filters | Skip string equality checks without metadata scan | Medium |
+| Adaptive encoding per chunk | Better compression on mixed data | Medium |
+| Parallel chunk decode | 4-8x faster scan on multi-core | Low (chunks are independent) |
+| Result cache reuse across queries | Sub-millisecond for repeated queries on static data | Already done |
+| Memory-mapped .tuck files | Lower memory usage, instant open | Low |
+
+---
+
 ## 🛣 Roadmap
 
 ```
