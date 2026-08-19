@@ -1,6 +1,10 @@
+use std::sync::Arc;
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use tuckdb::IncrementalEngine;
 use tuckdb::cache::DataCache;
 use tuckdb::cache::policy::EvictionPolicy;
+use tuckdb::embedding::MockEmbeddingProvider;
 use tuckdb::exec::batch::{Column, ColumnData, RecordBatch};
 use tuckdb::exec::expr::{col, lit_float};
 use tuckdb::exec::logical_plan::AggOp;
@@ -12,6 +16,26 @@ use tuckdb::storage::chunk::{ChunkMeta, ColumnStats, EncodedChunk};
 use tuckdb::storage::encoding;
 use tuckdb::storage::encoding::{bitmap, float64, int64, rle, utf8};
 use tuckdb::storage::format::{BlobReader, BlobWriter};
+
+// ---------------------------------------------------------------------------
+// Deduplication benchmarks
+// ---------------------------------------------------------------------------
+fn dedup_benchmarks(c: &mut Criterion) {
+    for &size in &[10_000usize, 100_000] {
+        let mut g = c.benchmark_group(format!("dedup/{}", size));
+        g.throughput(Throughput::Elements(size as u64));
+        g.bench_function("insert_all", |b| {
+            b.iter(|| {
+                let mut dedup = tuckdb::lifecycle::ContentDedup::new();
+                for i in 0..size {
+                    dedup.insert(&[&format!("content_{}", i % (size - size / 10))]);
+                }
+                black_box(dedup.report());
+            });
+        });
+        g.finish();
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Deterministic PRNG (xorshift64*)
@@ -464,11 +488,38 @@ fn persistence_benchmarks(c: &mut Criterion) {
     g.finish();
 }
 
+// ---------------------------------------------------------------------------
+// Incremental lifecycle + vector update benchmarks
+// ---------------------------------------------------------------------------
+fn incremental_benchmarks(c: &mut Criterion) {
+    let docs = 2000usize;
+    let changed = 200usize;
+    let content = |id: usize| format!("S1 {id}.\n\nS2 {id}.\n\nS3 {id}.\n\nS4 {id}.\n\nS5 {id}.");
+    let updated = |id: usize| format!("S1 {id}.\n\nS2 {id} R.\n\nS3 {id}.\n\nS4 {id}.\n\nS5 {id}.");
+
+    let mut g = c.benchmark_group("incremental");
+    g.bench_function("ingest_and_update_10pct", |b| {
+        b.iter(|| {
+            let mut engine = IncrementalEngine::new(Arc::new(MockEmbeddingProvider::default()));
+            for id in 0..docs {
+                engine.ingest(id as i64, &content(id));
+            }
+            for id in 0..changed {
+                engine.update(id as i64, &updated(id)).unwrap();
+            }
+            black_box(engine.store().len());
+        });
+    });
+    g.finish();
+}
+
 criterion_group!(
     benches,
     encoding_benchmarks,
     query_benchmarks,
     cache_benchmarks,
-    persistence_benchmarks
+    persistence_benchmarks,
+    dedup_benchmarks,
+    incremental_benchmarks
 );
 criterion_main!(benches);

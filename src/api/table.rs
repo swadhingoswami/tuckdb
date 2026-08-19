@@ -6,7 +6,8 @@ use crate::exec::expr::Expr;
 use crate::exec::logical_plan::LogicalPlan;
 use crate::exec::optimizer::Optimizer;
 use crate::exec::physical_plan::{
-    BoxedOperator, FileScan, PhysicalAggregate, PhysicalFilter, PhysicalProject, PhysicalScan,
+    BoxedOperator, FileScan, PhysicalAggregate, PhysicalFilter, PhysicalLimit, PhysicalProject,
+    PhysicalScan,
 };
 
 use crate::api::result::ResultSet;
@@ -151,6 +152,10 @@ impl Table {
                     aggs.clone(),
                     group_by.clone(),
                 ))
+            }
+            LogicalPlan::Limit { input, limit } => {
+                let child = self.build_physical(input);
+                Box::new(PhysicalLimit::new(child, *limit))
             }
         }
     }

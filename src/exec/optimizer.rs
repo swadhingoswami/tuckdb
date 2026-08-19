@@ -60,6 +60,13 @@ impl Optimizer {
                     group_by,
                 }
             }
+            LogicalPlan::Limit { input, limit } => {
+                let new_input = Self::push_projection_into_scan(*input, schema);
+                LogicalPlan::Limit {
+                    input: Box::new(new_input),
+                    limit,
+                }
+            }
             other => other,
         }
     }
@@ -108,6 +115,13 @@ impl Optimizer {
                     input: Box::new(new_input),
                     aggs,
                     group_by,
+                }
+            }
+            LogicalPlan::Limit { input, limit } => {
+                let new_input = Self::push_filter_into_scan(*input);
+                LogicalPlan::Limit {
+                    input: Box::new(new_input),
+                    limit,
                 }
             }
             other => other,

@@ -4,7 +4,8 @@ use std::ptr;
 use std::sync::Mutex;
 
 use sqlparser::ast::{
-    BinaryOperator, Expr as SqlExpr, SelectItem, SetExpr, Statement, TableFactor, Value as SqlValue,
+    BinaryOperator, Expr as SqlExpr, FunctionArg, FunctionArgExpr, SelectItem, SetExpr, Statement,
+    TableFactor, Value as SqlValue,
 };
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
@@ -196,6 +197,40 @@ fn sql_to_tk_expr(e: &SqlExpr) -> Result<Expr, String> {
             }
         }
         SqlExpr::Nested(inner) => sql_to_tk_expr(inner),
+        SqlExpr::Function(f) => {
+            let name = f.name.to_string().to_uppercase();
+            if name != "SIMILARITY" {
+                return Err(format!("Unsupported function: {}", name));
+            }
+            let args = match &f.args {
+                sqlparser::ast::FunctionArguments::List(list) => &list.args,
+                _ => return Err("SIMILARITY requires two arguments".to_string()),
+            };
+            if args.len() != 2 {
+                return Err("SIMILARITY requires (column, 'query')".to_string());
+            }
+            let col_arg = match &args[0] {
+                FunctionArg::Unnamed(e) => e,
+                _ => return Err("SIMILARITY first argument must be a column".to_string()),
+            };
+            let query_arg = match &args[1] {
+                FunctionArg::Unnamed(e) => e,
+                _ => return Err("SIMILARITY second argument must be a string literal".to_string()),
+            };
+            match (col_arg, query_arg) {
+                (
+                    FunctionArgExpr::Expr(SqlExpr::Identifier(ident)),
+                    FunctionArgExpr::Expr(SqlExpr::Value(vws)),
+                ) => match &vws.value {
+                    SqlValue::SingleQuotedString(s) => Ok(Expr::Similarity {
+                        column: ident.value.clone(),
+                        query: s.clone(),
+                    }),
+                    _ => Err("SIMILARITY query must be a string literal".to_string()),
+                },
+                _ => Err("SIMILARITY requires (column, 'query')".to_string()),
+            }
+        }
         _ => Err("Unsupported SQL expression".to_string()),
     }
 }
@@ -210,9 +245,9 @@ fn sql_to_logical_plan(sql: &str, default_table: &str) -> Result<LogicalPlan, St
     }
     let stmt = stmts.remove(0);
 
-    let select = match &stmt {
+    let (select, limit) = match &stmt {
         Statement::Query(q) => match &*q.body {
-            SetExpr::Select(s) => s,
+            SetExpr::Select(s) => (s, q.limit.as_ref()),
             _ => return Err("Only SELECT queries are supported".to_string()),
         },
         _ => return Err("Only SELECT queries are supported".to_string()),
@@ -267,11 +302,24 @@ fn sql_to_logical_plan(sql: &str, default_table: &str) -> Result<LogicalPlan, St
         None => None,
     };
 
-    Ok(LogicalPlan::Scan {
+    let plan = LogicalPlan::Scan {
         table: default_table.to_string(),
         projection,
         filter,
-    })
+    };
+
+    if let Some(limit_expr) = limit
+        && let SqlExpr::Value(vws) = limit_expr
+        && let SqlValue::Number(n, _) = &vws.value
+        && let Ok(n) = n.parse::<usize>()
+    {
+        return Ok(LogicalPlan::Limit {
+            input: Box::new(plan),
+            limit: n,
+        });
+    }
+
+    Ok(plan)
 }
 
 fn col_as_f64(col: &ColumnData, row: usize) -> Option<f64> {

@@ -1,3 +1,4 @@
+use crate::embedding::provider::EmbeddingProvider;
 use crate::exec::batch::{ColumnData, RecordBatch};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -12,6 +13,11 @@ pub enum Expr {
     Lte(Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
+    /// Vector/semantic similarity between a column value and a query string.
+    Similarity {
+        column: String,
+        query: String,
+    },
 }
 
 impl Expr {
@@ -71,6 +77,14 @@ pub fn lit_str(v: &str) -> Expr {
     Expr::Literal(Value::Str(v.to_string()))
 }
 
+/// Semantic similarity between a column value and a query string.
+pub fn similarity(column: &str, query: &str) -> Expr {
+    Expr::Similarity {
+        column: column.to_string(),
+        query: query.to_string(),
+    }
+}
+
 pub fn eval_expr(expr: &Expr, batch: &RecordBatch, row: usize) -> Option<Value> {
     match expr {
         Expr::Column(name) => {
@@ -127,6 +141,17 @@ pub fn eval_expr(expr: &Expr, batch: &RecordBatch, row: usize) -> Option<Value> 
             let ia = if let Value::Int(i) = va { i } else { 0 };
             let ib = if let Value::Int(i) = vb { i } else { 0 };
             Some(Value::Int(if ia != 0 || ib != 0 { 1 } else { 0 }))
+        }
+        Expr::Similarity { column, query } => {
+            let idx = batch.schema.index_of(column)?;
+            let text = match &batch.columns[idx].data {
+                ColumnData::Utf8(v) => v.get(row).cloned(),
+                _ => None,
+            }?;
+            let provider = crate::embedding::provider::default_embedding_provider();
+            let qv = provider.embed(query);
+            let tv = provider.embed(&text);
+            Some(Value::Float(crate::embedding::cosine(&qv, &tv)))
         }
     }
 }
@@ -197,6 +222,7 @@ pub(crate) fn could_match(expr: &Expr, col_name: &str, min: f64, max: f64) -> bo
         Expr::Lte(a, b) => cmp_lit(a, b, col_name, |val| min <= val),
         Expr::And(a, b) => could_match(a, col_name, min, max) && could_match(b, col_name, min, max),
         Expr::Or(a, b) => could_match(a, col_name, min, max) || could_match(b, col_name, min, max),
+        Expr::Similarity { .. } => true,
     }
 }
 
@@ -234,6 +260,11 @@ fn collect_columns(expr: &Expr, cols: &mut Vec<String>) {
         | Expr::Or(a, b) => {
             collect_columns(a, cols);
             collect_columns(b, cols);
+        }
+        Expr::Similarity { column, .. } => {
+            if !cols.contains(column) {
+                cols.push(column.clone());
+            }
         }
     }
 }

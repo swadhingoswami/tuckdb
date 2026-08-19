@@ -29,6 +29,10 @@ pub enum LogicalPlan {
         aggs: Vec<(AggOp, String, String)>, // (op, input_col, output_name)
         group_by: Vec<String>,
     },
+    Limit {
+        input: Box<LogicalPlan>,
+        limit: usize,
+    },
 }
 
 impl LogicalPlan {
@@ -62,6 +66,13 @@ impl LogicalPlan {
                 .map(|(op, col, name)| (op, col.to_string(), name.to_string()))
                 .collect(),
             group_by: group_by.to_vec(),
+        }
+    }
+
+    pub fn limit(self, limit: usize) -> Self {
+        LogicalPlan::Limit {
+            input: Box::new(self),
+            limit,
         }
     }
 }

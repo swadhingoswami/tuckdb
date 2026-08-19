@@ -530,6 +530,48 @@ impl PhysicalOperator for FileScan {
     }
 }
 
+pub struct PhysicalLimit {
+    input: BoxedOperator,
+    limit: usize,
+    emitted: usize,
+}
+
+impl PhysicalLimit {
+    pub fn new(input: BoxedOperator, limit: usize) -> Self {
+        Self {
+            input,
+            limit,
+            emitted: 0,
+        }
+    }
+}
+
+impl PhysicalOperator for PhysicalLimit {
+    fn next_batch(&mut self) -> Option<RecordBatch> {
+        if self.emitted >= self.limit {
+            return None;
+        }
+        let batch = self.input.next_batch()?;
+        let remaining = self.limit - self.emitted;
+        if batch.num_rows <= remaining {
+            self.emitted += batch.num_rows;
+            return Some(batch);
+        }
+        let mut columns = Vec::with_capacity(batch.columns.len());
+        for col in &batch.columns {
+            let data = match &col.data {
+                ColumnData::Int64(v) => ColumnData::Int64(v[..remaining].to_vec()),
+                ColumnData::Float64(v) => ColumnData::Float64(v[..remaining].to_vec()),
+                ColumnData::Utf8(v) => ColumnData::Utf8(v[..remaining].to_vec()),
+                ColumnData::Timestamp(v) => ColumnData::Timestamp(v[..remaining].to_vec()),
+            };
+            columns.push(Column::new(col.field.clone(), data));
+        }
+        self.emitted = self.limit;
+        Some(RecordBatch::new(batch.schema.clone(), columns))
+    }
+}
+
 enum Accumulator {
     Sum(f64),
     Count(u64),
