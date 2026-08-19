@@ -140,6 +140,47 @@ flowchart TD
     LM --> DEL[DELETE -> clean only affected vectors]
 ```
 
+### 🔧 Insert & search, step by step
+
+**How INSERT works** — one file/row becomes many chunks, each chunk becomes a vector:
+
+```mermaid
+flowchart LR
+    F[text file / row] -->|read_to_string| TXT[text]
+    TXT -->|chunk_document| C[chunk 0..n<br/>+ content hash]
+    C -->|provider.embed| E[vector per chunk<br/>+ model id]
+    E -->|store.insert| VS[(vector DB)]
+    VS -->|save_to .tkdb| D[(vector_db.tkdb)]
+```
+
+1. **Read** the file/row as text (`file_index_demo` reads a real file by path).
+2. **Chunk** it with a deterministic chunker — each paragraph becomes a `Chunk`
+   carrying a content hash.
+3. **Embed** every chunk into a fixed-size vector (same text → same vector; each
+   vector records which model produced it).
+4. **Store** the vectors keyed by `(document_id, chunk_id)` — that is the vector DB.
+5. **Persist** the whole engine state (lifecycle + chunks + vectors) to one `.tkdb` file.
+
+**How SEARCH works** — a question becomes a vector, compared to every stored vector:
+
+```mermaid
+flowchart LR
+    Q[question text] -->|provider.embed| QV[query vector]
+    QV -->|store.search| SC[cosine(query, every vector)]
+    SC -->|sort descending| TOP[top-K chunks + scores]
+    TOP -->|map back via chunk tracker| R[chunk content / row]
+```
+
+1. **Embed** the question with the same provider → one query vector.
+2. **Compare** the query vector against every stored vector (brute-force cosine).
+3. **Sort** by similarity, keep the top-K matches.
+4. **Map** each match back to its chunk content (via the chunk tracker) for display.
+5. Optional **structured pre-filter** (e.g. `topic = 'memory'`) narrows candidates
+   before returning.
+
+In the demo you type `q <question>`; in SQL the same search is
+`WHERE SIMILARITY(col, '…') > 0.3` or `WHERE VECTOR_SEARCH(col, '…', 0.3)`.
+
 ### ✨ New capabilities
 
 | | Feature | What it means for you |
@@ -179,24 +220,45 @@ sequenceDiagram
     D-->>U: #1 "std::unique_ptr is an exclusive owner…"
 ```
 
-```bash
-# 1. Upload a real file and index it
-cargo run --example file_index_demo -- --file data/demo_cpp.txt
+**Step-by-step with real output** (`cargo run --example file_index_demo`):
 
-# 2. NEW session: nothing is re-processed
-#    [load] restored 1 docs / 11 vectors — nothing re-processed
+```text
+Step 1 — upload a real file: it is chunked, each chunk embedded, all vectors stored
+$ cargo run --example file_index_demo -- --dir /tmp/tuckdb_readme
+> add data/demo_cpp.txt
+> [add] doc 0 <- data/demo_cpp.txt: 11 new chunks embedded (0 -> 11 vectors; existing untouched)
+      vector DB saved to /tmp/tuckdb_readme/vector_db.tkdb
+> list
+  doc 0: data/demo_cpp.txt (11 chunks)
+  total vectors in vector DB: 11
 
-# 3. Add another file — only the new file is processed
-#    > add README.md
-#    [add] doc 1 <- README.md: 330 new chunks (11 -> 341 vectors; existing untouched)
+Step 2 — ask real questions: the question is embedded, compared to every vector, top-K returned
+> q How do I manage ownership of dynamically allocated memory?
+  #1 score=0.437 [data/demo_cpp.txt chunk 1]
+     "Ownership of dynamically allocated memory is best expressed with smart pointers. std::unique_ptr is an exclusive owner; "
+> q What is runtime polymorphism?
+  #1 score=0.540 [data/demo_cpp.txt chunk 7]
+     "Virtual functions provide runtime polymorphism through the vtable. A base class declares a function virtual, derived cla"
 
-# 4. Search
-#    > q What is the tuck file format?
-#    #1 score=0.591 [README.md chunk 199] "### Summary: What's in the .tuck file…"
+Step 3 — NEW session (restart): the vector DB is restored, nothing is re-processed
+$ cargo run --example file_index_demo -- --dir /tmp/tuckdb_readme
+[load] restored 1 docs / 11 vectors from /tmp/tuckdb_readme/vector_db.tkdb — nothing re-processed
 
-# 5. Delete — only that file's vectors are removed
-#    > del 0
-#    [del] doc 0: removed 11 vectors directly (341 -> 330); unrelated untouched
+Step 4 — add another file: only the NEW file is processed, existing vectors untouched
+> add README.md
+> [add] doc 1 <- README.md: 364 new chunks embedded (11 -> 375 vectors; existing untouched)
+
+Step 5 — search the newly added file
+> q What is inside a tuck file?
+  #1 score=0.774 [README.md chunk 291]
+     "### What's inside a .tuck file?"
+
+Step 6 — delete a file: only that file's vectors are removed (no full scan)
+> del 0
+> [del] doc 0: removed 11 vectors directly (375 -> 364); unrelated untouched
+> list
+  doc 1: README.md (364 chunks)
+  total vectors in vector DB: 364
 ```
 
 > 📄 **Full end-to-end transcript (real, unedited output):** see
