@@ -220,47 +220,67 @@ sequenceDiagram
     D-->>U: #1 "std::unique_ptr is an exclusive owner…"
 ```
 
-**Step-by-step with real output** (`cargo run --example file_index_demo`):
+### 🧪 The real demo, step by step (with the demo file)
+
+**The demo file** — `data/demo_cpp.txt`, a real C++ guide. It contains **11 paragraphs**, and each paragraph becomes **1 chunk**:
 
 ```text
-Step 1 — upload a real file: it is chunked, each chunk embedded, all vectors stored
-$ cargo run --example file_index_demo -- --dir /tmp/tuckdb_readme
+# A Practical C++ Guide
+
+Ownership of dynamically allocated memory is best expressed with smart pointers. std::unique_ptr is an exclusive owner; ...
+Resource Acquisition Is Initialization, RAII, means the lifetime of a resource is tied to the lifetime of an object. ...
+Move semantics avoid expensive deep copies. ...
+... (11 paragraphs = 11 chunks)
+```
+
+**Step 1 — INSERT the file into the vector DB**
+
+```bash
+cargo run --example file_index_demo -- --dir /tmp/tuckdb_steps
 > add data/demo_cpp.txt
 > [add] doc 0 <- data/demo_cpp.txt: 11 new chunks embedded (0 -> 11 vectors; existing untouched)
-      vector DB saved to /tmp/tuckdb_readme/vector_db.tkdb
+      vector DB saved to /tmp/tuckdb_steps/vector_db.tkdb
 > list
   doc 0: data/demo_cpp.txt (11 chunks)
   total vectors in vector DB: 11
+```
+*(The file is chunked → each chunk embedded → 11 vectors stored.)*
 
-Step 2 — ask real questions: the question is embedded, compared to every vector, top-K returned
+**Step 2 — QUERY it (ask a question)**
+
+```bash
 > q How do I manage ownership of dynamically allocated memory?
   #1 score=0.437 [data/demo_cpp.txt chunk 1]
      "Ownership of dynamically allocated memory is best expressed with smart pointers. std::unique_ptr is an exclusive owner; "
-> q What is runtime polymorphism?
-  #1 score=0.540 [data/demo_cpp.txt chunk 7]
-     "Virtual functions provide runtime polymorphism through the vtable. A base class declares a function virtual, derived cla"
+```
+*(The question is embedded, compared to all 11 vectors, top-K returned.)*
 
-Step 3 — NEW session (restart): the vector DB is restored, nothing is re-processed
-$ cargo run --example file_index_demo -- --dir /tmp/tuckdb_readme
-[load] restored 1 docs / 11 vectors from /tmp/tuckdb_readme/vector_db.tkdb — nothing re-processed
+**Step 3 — UPDATE: edit 1 paragraph and re-upload the file**
 
-Step 4 — add another file: only the NEW file is processed, existing vectors untouched
-> add README.md
-> [add] doc 1 <- README.md: 364 new chunks embedded (11 -> 375 vectors; existing untouched)
+Edit just the smart-pointers paragraph in `demo_cpp.txt` and save it as `data/demo_cpp_v2.txt` (everything else identical), then:
 
-Step 5 — search the newly added file
-> q What is inside a tuck file?
-  #1 score=0.774 [README.md chunk 291]
-     "### What's inside a .tuck file?"
-
-Step 6 — delete a file: only that file's vectors are removed (no full scan)
-> del 0
-> [del] doc 0: removed 11 vectors directly (375 -> 364); unrelated untouched
-> list
-  doc 1: README.md (364 chunks)
-  total vectors in vector DB: 364
+```bash
+> update 0 data/demo_cpp_v2.txt
+> [update] doc 0 <- data/demo_cpp_v2.txt: changed chunks = 1, re-embedded = 1, skipped = 10, work avoided = 90.9%
+      vector DB saved to /tmp/tuckdb_steps/vector_db.tkdb
 ```
 
+**Step 4 — VERIFY only that 1 chunk was updated**
+
+```bash
+> list
+  doc 0: data/demo_cpp_v2.txt (11 chunks)      # still 11 vectors — count did NOT change
+  total vectors in vector DB: 11
+> q How do I manage ownership of dynamically allocated memory?
+  #1 score=0.440 [data/demo_cpp_v2.txt chunk 1]  # chunk 1 now reflects the edited text
+```
+
+**What happened:** the engine hashed every chunk, compared with the stored hashes,
+and found that **only chunk 1 changed**. It re-embedded **1 chunk** and **skipped 10**
+(90.9% work avoided) — it did *not* reprocess the whole file.
+
+> 📄 **Every step segregated with full details** (file, command, real output,
+> explanation): **[docs/DEMO_STEPS.md](docs/DEMO_STEPS.md)**.
 > 📄 **Full end-to-end transcript (real, unedited output):** see
 > **[docs/E2E_DEMO.md](docs/E2E_DEMO.md)** — reproduce it with `./scripts/e2e_demo.sh`.
 

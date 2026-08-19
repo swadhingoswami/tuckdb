@@ -1,0 +1,21 @@
+# A Practical C++ Guide
+
+Ownership of dynamically allocated memory is best expressed with smart pointers. std::unique_ptr is an exclusive owner; it cannot be copied, only moved, so the ownership of the heap object is transferred rather than duplicated. std::shared_ptr allows multiple owners and keeps the object alive while any owner remains. std::weak_ptr observes without owning, which breaks reference cycles. Moving a std::unique_ptr into a std::vector transfers ownership of the heap object to the container.
+
+Resource Acquisition Is Initialization, RAII, means the lifetime of a resource is tied to the lifetime of an object. The constructor acquires the resource, and the destructor releases it. When the object goes out of scope, the destructor runs automatically, even if an exception unwinds the stack, so files, locks, and sockets are always released.
+
+Move semantics avoid expensive deep copies. A move constructor steals the internal buffers and pointers from a temporary object and leaves the source in a valid but empty state. This is why std::vector and std::string grow efficiently: reallocations move their elements instead of copying them.
+
+The standard library provides containers such as std::vector, std::map, std::unordered_map, std::set, and std::deque. Choose a container by its access pattern: contiguous storage and O(1) indexing for vector, sorted keys and O(log n) lookup for map, and hash based O(1) lookup for unordered_map.
+
+Lambdas let you write small functions inline and capture variables from the enclosing scope. They are the natural way to pass custom behavior to algorithms like std::sort, std::find_if, and std::for_each. A lambda can capture by value, by reference, or with an initializer.
+
+Templates provide compile time polymorphism and generic programming. A function template is instantiated once per distinct type, producing specialized code with no virtual dispatch. Concepts, available since C++20, constrain template parameters so errors are reported with readable messages.
+
+Virtual functions provide runtime polymorphism through the vtable. A base class declares a function virtual, derived classes override it, and calling through a base pointer dispatches to the most derived implementation. Use virtual functions when the set of types is open and can grow.
+
+Concurrency is supported by std::thread, std::mutex, and std::atomic. Guard every shared mutable state with a mutex, or use atomics for simple counters. Locking order discipline prevents deadlocks, and RAII lock guards release the mutex when the scope exits.
+
+Exception safety is governed by the guarantees a function provides. The strong guarantee means either the operation succeeds or the state is unchanged; RAII is the primary tool for achieving it. Destructors should never throw, because an exception during stack unwinding calls std::terminate.
+
+Good C++ code favors value semantics, const correctness, and small focused functions. Prefer std::unique_ptr for ownership, avoid raw new and delete, use the standard algorithms instead of hand written loops, and let the compiler deduce types with auto.

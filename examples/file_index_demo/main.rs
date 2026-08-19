@@ -34,11 +34,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!();
     println!("Commands:");
-    println!("  add <path>    upload a text file and index it (only the new file is processed)");
-    println!("  del <doc_id>  remove a file's vectors (only that file's data is cleaned)");
-    println!("  q <text>      semantic search");
-    println!("  list          show indexed files");
-    println!("  exit          quit");
+    println!("  add <path>       upload a text file and index it (only the new file is processed)");
+    println!("  update <id> <path>  replace a file's content; only changed chunks are re-embedded");
+    println!("  del <doc_id>     remove a file's vectors (only that file's data is cleaned)");
+    println!("  q <text>         semantic search");
+    println!("  list             show indexed files");
+    println!("  exit             quit");
     println!();
 
     let stdin = io::stdin();
@@ -70,10 +71,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             "del" if !rest.is_empty() => {
                 del_doc(&mut engine, &db_path, &dir, &mut manifest, &rest)?
             }
+            "update" if !rest.is_empty() => {
+                update_doc(&mut engine, &db_path, &dir, &mut manifest, &rest)?
+            }
             "q" if !rest.is_empty() => search(&engine, &manifest, &rest, top)?,
             "list" => list_files(&engine, &manifest),
             other => println!(
-                "unknown command: {other} (add <path> | del <id> | q <text> | list | exit)"
+                "unknown command: {other} (add <path> | update <id> <path> | del <id> | q <text> | list | exit)"
             ),
         }
     }
@@ -107,6 +111,39 @@ fn add_file(
         engine.store().len()
     );
     manifest.push((doc_id, path.to_path_buf()));
+    engine.save_to(db_path)?;
+    save_manifest(dir, manifest);
+    println!("      vector DB saved to {}", db_path.display());
+    Ok(())
+}
+
+fn update_doc(
+    engine: &mut IncrementalEngine,
+    db_path: &Path,
+    dir: &Path,
+    manifest: &mut Vec<(i64, PathBuf)>,
+    arg: &str,
+) -> Result<(), Box<dyn Error>> {
+    let (id_str, path_str) = arg.split_once(char::is_whitespace).unwrap_or((arg, ""));
+    if path_str.is_empty() {
+        return Err("usage: update <doc_id> <path>".into());
+    }
+    let doc_id: i64 = id_str.parse().map_err(|_| "doc id must be a number")?;
+    let path = PathBuf::from(path_str);
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read {}: {}", path.display(), e))?;
+    let report = engine.update(doc_id, &text)?;
+    println!(
+        "[update] doc {doc_id} <- {}: changed chunks = {}, re-embedded = {}, skipped = {}, work avoided = {:.1}%",
+        path.display(),
+        report.changed_chunks,
+        report.embeddings_generated,
+        report.embeddings_skipped,
+        report.work_avoided_pct
+    );
+    if let Some(slot) = manifest.iter_mut().find(|(d, _)| *d == doc_id) {
+        slot.1 = path;
+    }
     engine.save_to(db_path)?;
     save_manifest(dir, manifest);
     println!("      vector DB saved to {}", db_path.display());
