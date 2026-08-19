@@ -2,6 +2,12 @@
 
 Complete step-by-step scenarios with commands and expected output.
 
+> 💡 **New — TuckDB-AI:** semantic vector search, `SIMILARITY(...)`/`VECTOR_SEARCH(...)`
+> SQL, and an incremental AI data lifecycle (chunks, embeddings, vector DB) that is
+> derived from your data and updated incrementally. See
+> [docs/VECTOR_DB.md](docs/VECTOR_DB.md) and the
+> [README TuckDB-AI section](../README.md#-tuckdb-ai--incremental-ai-data-engine).
+
 ---
 
 ## Table of Contents

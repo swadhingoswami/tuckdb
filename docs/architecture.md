@@ -242,6 +242,19 @@ lib.rs
   │    ├── result_cache  → exec
   │    └── policy.rs     → (no deps)
   │
+  ├── lifecycle           ← TuckDB-AI
+  │    ├── state.rs      → (no deps)          # versions, content hash, Active/Stale
+  │    ├── dedup.rs      → state              # exact content dedup (FNV-1a)
+  │    └── chunk.rs      → state              # paragraph chunker + per-chunk diff
+  │
+  ├── embedding           ← TuckDB-AI
+  │    ├── provider.rs   → lifecycle (fnv1a)  # EmbeddingProvider + mock provider
+  │    ├── store.rs      → (no deps)          # vector store, cosine top-K, persistence
+  │    └── dedup.rs      → store              # semantic duplicate candidates
+  │
+  ├── incremental         ← TuckDB-AI
+  │    └── mod.rs        → lifecycle, embedding   # IncrementalEngine: ingest/update/delete/migrate + persistence
+  │
   └── backend
        ├── traits.rs     → (no deps)
        ├── local_fs.rs   → traits

@@ -21,12 +21,14 @@
   <code>32x compression on booleans</code> •
   <code>zero server processes</code> •
   <code>6 column encodings</code> •
+  <code>incremental AI engine</code> •
   <code>C API</code> •
   <code>S3 backend</code>
 </p>
 
 <p align="center">
   <a href="#-try-it-in-30-seconds"><b>🚀 Try it in 30s</b></a> •
+  <a href="#-tuckdb-ai--incremental-ai-data-engine"><b>🤖 TuckDB-AI</b></a> •
   <a href="#-features-at-a-glance">Features</a> •
   <a href="#-architecture">Architecture</a> •
   <a href="#-performance">Performance</a> •
@@ -106,6 +108,142 @@ File size: 644 bytes
 
 ---
 
+## 🤖 TuckDB-AI — Incremental AI Data Engine
+
+> **A small change in AI data can trigger expensive reprocessing of large datasets.**
+>
+> **TuckDB-AI detects exactly what changed and updates only the affected data.**
+
+TuckDB now extends into a **unified SQL + vector engine**: vector representations
+(chunks, embeddings, vector search) are **derived from your database data** and
+**incrementally maintained** as that data changes.
+
+> *"I am trying to eliminate the boundary between the database and its AI representation."*
+
+### 🏗 How it works
+
+```mermaid
+flowchart TD
+    App[Application] --> Q[SQL / AI Query]
+    Q --> P[Query Parser]
+    P --> PL[Query Planner]
+    PL --> R{contains SIMILARITY<br/>or VECTOR_SEARCH?}
+    R -- yes --> VE[Vector / Semantic Engine]
+    R -- no --> SE[Structured SQL Engine]
+    SE --> T[(TuckDB .tuck file)]
+    VE --> VS[(Vector DB .tkdb file)]
+    VE -. vectors derived from the same table rows .-> T
+    T --> LM[Lifecycle Manager]
+    VS --> LM
+    LM --> ADD[INSERT -> index only new data]
+    LM --> UPD[UPDATE -> re-embed only changed chunks]
+    LM --> DEL[DELETE -> clean only affected vectors]
+```
+
+### ✨ New capabilities
+
+| | Feature | What it means for you |
+|-|---------|----------------------|
+| 🔎 | **Semantic vector search** | Ask questions in natural language; top-K cosine results with scores |
+| 🧠 | **`SIMILARITY(...)` / `VECTOR_SEARCH(...)` SQL** | Semantic operators inside `WHERE`; the query itself decides the route |
+| 🔁 | **Incremental update** | A chunk change re-embeds **only that chunk** — 500k chunks, 1k changed → **99.8% work avoided** |
+| 🗑️ | **Incremental delete** | Removing a document cleans only its vectors — no full vector scan |
+| 🧬 | **Exact + semantic dedup** | Byte-identical hashes (FNV-1a) and embedding-based paraphrase candidates |
+| 🧭 | **Model versioning** | Every vector knows its model; migrate v1→v2 without touching unchanged data |
+| 💾 | **Persistent vector DB** | Whole engine state (lifecycle + chunks + vectors) saved to one `.tkdb` file |
+| 🔀 | **Query-driven routing** | `SIMILARITY`/`VECTOR_SEARCH` → vector DB; otherwise → `.tuck` file |
+
+### 🖼️ Demo walkthrough: upload → chunk → store → query
+
+Index any text file (`.txt`, `.md`, `.pdb`, …) into the vector DB, then query it —
+**adding or deleting files later never re-processes the existing data**:
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant D as file_index_demo
+    participant E as IncrementalEngine
+    participant S as Vector DB (.tkdb)
+
+    U->>D: add data/demo_cpp.txt
+    D->>E: ingest(file)
+    E->>E: chunk text (paragraphs)
+    E->>E: embed each chunk
+    E->>S: store vectors (11)
+    D->>S: save_to vector_db.tkdb
+
+    U->>D: q "How do I manage ownership?"
+    D->>E: embed query
+    E->>S: search (cosine top-K)
+    S-->>D: ranked chunks + scores
+    D-->>U: #1 "std::unique_ptr is an exclusive owner…"
+```
+
+```bash
+# 1. Upload a real file and index it
+cargo run --example file_index_demo -- --file data/demo_cpp.txt
+
+# 2. NEW session: nothing is re-processed
+#    [load] restored 1 docs / 11 vectors — nothing re-processed
+
+# 3. Add another file — only the new file is processed
+#    > add README.md
+#    [add] doc 1 <- README.md: 330 new chunks (11 -> 341 vectors; existing untouched)
+
+# 4. Search
+#    > q What is the tuck file format?
+#    #1 score=0.591 [README.md chunk 199] "### Summary: What's in the .tuck file…"
+
+# 5. Delete — only that file's vectors are removed
+#    > del 0
+#    [del] doc 0: removed 11 vectors directly (341 -> 330); unrelated untouched
+```
+
+> 📄 **Full end-to-end transcript (real, unedited output):** see
+> **[docs/E2E_DEMO.md](docs/E2E_DEMO.md)** — reproduce it with `./scripts/e2e_demo.sh`.
+
+### ⚡ Headline numbers
+
+```
+Dataset:                   500,000 chunks
+Changed:                     1,000
+Processed (incremental):     1,000
+Skipped:                   499,000
+
+Work avoided:                99.8%
+```
+
+Reproduce it yourself:
+
+```bash
+cargo run --release --example benchmark_report   # scaling table → target/benchmark_report.md
+cargo run --release --example showcase           # the full story in one run
+```
+
+### 🧭 Full demo list
+
+```bash
+cargo run --example lifecycle_demo          # versions, content hashes, stale state
+cargo run --example dedup_demo              # exact duplicate detection by content hash
+cargo run --example chunk_demo              # only the changed chunk is reprocessed
+cargo run --example embedding_demo          # mock embedding provider + vector store
+cargo run --example vector_search_demo      # semantic top-K over stored vectors
+cargo run --example sql_vector_demo         # SIMILARITY(...) in SQL
+cargo run --example hybrid_demo             # topic = 'memory' AND SIMILARITY(...) > 0.3
+cargo run --example incremental_demo        # 500k chunks / 1k changed → 99.8% avoided
+cargo run --example delete_demo             # delete cleans only affected vectors
+cargo run --example semantic_dedup_demo     # paraphrase candidates (report only)
+cargo run --example model_migration_demo    # v1 → v2 incremental migration
+cargo run --example file_index_demo         # real files → chunks → vector DB → queries
+cargo run --example unified_demo            # SQL routing: vector DB vs .tuck
+```
+
+See **[docs/VECTOR_DB.md](docs/VECTOR_DB.md)** for the deep dive (flow diagrams,
+routing, persistence format, benchmark table) and **[docs/PROGRESS.md](docs/PROGRESS.md)**
+for the phase-by-phase evidence.
+
+---
+
 ## ✨ Features at a glance
 
 | | Feature | What it means for you |
@@ -118,6 +256,9 @@ File size: 644 bytes
 | 🗄️ | **S3 + local backends** | Read/write compressed blobs to local disk or S3-compatible storage |
 | 🚀 | **Caching built-in** | LRU data cache for chunks + result cache for repeated queries |
 | 🔧 | **CLI + SQL** | Load CSVs, run SQL SELECT with WHERE/GROUP BY/aggregation |
+| 🤖 | **AI / vector engine** | Vector representations derived from your data, maintained incrementally |
+| 🔎 | **Semantic search** | Natural-language queries via SQL `SIMILARITY(...)` / `VECTOR_SEARCH(...)` |
+| 🔁 | **Incremental lifecycle** | Insert/update/delete re-process only the affected chunks — up to 99.8% work avoided |
 
 ---
 
@@ -897,6 +1038,9 @@ src/
 ├── exec/             # Query engine (LogicalPlan, Optimizer, Physical ops)
 ├── storage/          # Blob format (.tuck) + 6 encodings
 │   └── encoding/     # Delta, XOR, Dict+ZSTD, RLE, Bitmap, Timestamp
+├── lifecycle/        # TuckDB-AI: versions, content hashes, stale state, chunk diff, exact dedup
+├── embedding/        # TuckDB-AI: EmbeddingProvider, vector store, cosine search, semantic dedup
+├── incremental/      # TuckDB-AI: IncrementalEngine — ingest/update/delete/migrate + persistence
 ├── cache/            # DataCache (LRU/LFU) + ResultCache
 ├── backend/          # Local FS, S3, In-Memory
 └── capi/             # C FFI bindings
@@ -906,10 +1050,15 @@ examples/
 ├── demo_app/         # 100K rows end-to-end demo
 ├── basic_operations/ # 10-step CRUD walkthrough
 ├── time_series/      # 3-server analytics example
-└── crud_workflow/    # Product inventory cycle
+├── crud_workflow/    # Product inventory cycle
+├── file_index_demo/  # TuckDB-AI: real files → chunks → vector DB → queries
+├── unified_demo/     # TuckDB-AI: SQL routing — vector DB vs .tuck
+├── showcase/         # TuckDB-AI: the full story in one run
+└── benchmark_report/ # TuckDB-AI: scaling benchmark (work avoided, speedup)
 
 benches/              # Criterion benchmarks
 capi/tuckdb.h         # C header
+data/                 # TuckDB-AI: sample files (cpp_guide.txt, demo_cpp.txt, cpp_questions.csv)
 ```
 
 ---
@@ -1023,6 +1172,9 @@ cargo run --example demo_app          # 100K rows end-to-end
 cargo run --example basic_operations  # 10-step CRUD walkthrough
 cargo run --example time_series       # 3-server analytics
 cargo run --example crud_workflow     # Product inventory cycle
+cargo run --example showcase          # TuckDB-AI: full live demo
+cargo run --example file_index_demo   # TuckDB-AI: real files → chunks → vector DB → queries
+cargo run --example unified_demo      # TuckDB-AI: SQL routing (vector DB vs .tuck)
 ```
 
 ---

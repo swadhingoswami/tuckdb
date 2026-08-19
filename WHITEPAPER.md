@@ -8,6 +8,11 @@
 
 Modern analytical workloads suffer from a fragmented stack: separate tools for storage (S3, local disk), column formats (Parquet, ORC), query engines (DuckDB, Spark, ClickHouse), and caching (Redis, Memcached). Each layer introduces serialization boundaries, redundant decompression, and operational complexity. TuckDB is a Rust library that **co-designs compression, storage, query execution, and caching** into a single embeddable runtime. This paper describes its architecture, compression strategies, query engine design, and performance characteristics.
 
+> **TuckDB-AI (new):** the same runtime also serves as an incremental AI data engine.
+> Vector representations (chunks, embeddings, vector search) are derived from the
+> stored data and maintained incrementally — only the affected chunks are
+> re-processed on change. See [docs/VECTOR_DB.md](docs/VECTOR_DB.md).
+
 ---
 
 ## 1. Motivation
