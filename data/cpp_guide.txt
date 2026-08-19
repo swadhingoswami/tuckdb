@@ -1,0 +1,17 @@
+# C++ Memory and Ownership
+
+Resource Acquisition Is Initialization, commonly abbreviated as RAII, is a C++ programming technique that binds the life cycle of a resource to the lifetime of an object. The resource is acquired in the constructor, and released automatically in the destructor when the object goes out of scope. This guarantees that resources such as heap memory, file handles, and locks are released even when an exception is thrown.
+
+std::unique_ptr is the standard smart pointer for exclusive ownership. It transfers ownership through move semantics rather than copying, so a unique_ptr can be moved into a container or returned from a function without duplicating the underlying object. Copying a unique_ptr is not allowed, which makes the ownership model explicit and safe.
+
+Move semantics allow the resources owned by an object to be transferred to another object instead of being copied. A move constructor typically steals the pointers and heap allocations from the source object, then leaves the source in a valid but empty state. This avoids expensive deep copies of large containers and strings.
+
+Virtual functions enable runtime polymorphism. A base class declares a function as virtual, and derived classes override the behavior. When the function is called through a base class pointer or reference, the actual derived implementation is selected at runtime using the vtable.
+
+Templates enable compile-time polymorphism and generic programming. A function template or class template is instantiated with concrete types at compile time, which produces specialized code without any runtime dispatch overhead.
+
+Lambdas capture variables from the enclosing scope by value or by reference. They can be passed to standard algorithms such as std::sort and std::for_each, or stored in std::function. Captures make it easy to express small callback functions inline.
+
+std::mutex provides mutual exclusion for concurrent access to shared data. Locking a mutex before modifying shared state prevents data races, and RAII wrappers such as std::lock_guard release the lock automatically when they go out of scope.
+
+Exception safety relies on RAII and the strong exception guarantee. If a constructor throws, no object is created and all resources acquired by member objects are released. Destructors should never throw because they run during stack unwinding.

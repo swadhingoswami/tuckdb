@@ -174,6 +174,16 @@ fn cmd_query(query: &str, dir: &str) -> Result<(), Box<dyn std::error::Error>> {
         },
         _ => return Err("Only SELECT queries are supported".into()),
     };
+    let limit = match &statement {
+        Statement::Query(q) => match &q.limit {
+            Some(SqlExpr::Value(vws)) => match &vws.value {
+                Value::Number(n, _) => n.parse::<usize>().ok(),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    };
 
     let table_name = match select.from.first() {
         Some(tj) => match &tj.relation {
@@ -185,7 +195,7 @@ fn cmd_query(query: &str, dir: &str) -> Result<(), Box<dyn std::error::Error>> {
 
     let mut table = Table::open(&table_name, dir_path.clone());
 
-    let plan = build_plan(select, &table_name, table.schema())?;
+    let plan = build_plan(select, &table_name, table.schema(), limit)?;
     let mut rs = table.execute(plan);
     print_result_set(&mut rs);
     Ok(())
@@ -229,6 +239,7 @@ fn build_plan(
     select: &sqlparser::ast::Select,
     table_name: &str,
     schema: &Schema,
+    limit: Option<usize>,
 ) -> Result<LogicalPlan, Box<dyn std::error::Error>> {
     let mut plan = LogicalPlan::scan(table_name);
 
@@ -322,6 +333,10 @@ fn build_plan(
         }
     }
 
+    if let Some(n) = limit {
+        plan = plan.limit(n);
+    }
+
     Ok(plan)
 }
 
@@ -357,6 +372,34 @@ fn sql_to_tk_expr(sql: &SqlExpr) -> Result<TkExpr, Box<dyn std::error::Error>> {
             }
         }
         SqlExpr::Nested(e) => sql_to_tk_expr(e),
+        SqlExpr::Function(f) => {
+            let name = f.name.to_string().to_uppercase();
+            if name != "SIMILARITY" {
+                return Err(format!("Unsupported function: {}", name).into());
+            }
+            let args = match &f.args {
+                sqlparser::ast::FunctionArguments::List(list) => &list.args,
+                _ => return Err("SIMILARITY requires two arguments".into()),
+            };
+            if args.len() != 2 {
+                return Err("SIMILARITY requires (column, 'query')".into());
+            }
+            let col_arg = get_function_arg_expr(&args[0]);
+            let query_arg = get_function_arg_expr(&args[1]);
+            match (col_arg, query_arg) {
+                (
+                    Some(FunctionArgExpr::Expr(SqlExpr::Identifier(ident))),
+                    Some(FunctionArgExpr::Expr(SqlExpr::Value(vws))),
+                ) => match &vws.value {
+                    Value::SingleQuotedString(s) => Ok(TkExpr::Similarity {
+                        column: ident.value.clone(),
+                        query: s.clone(),
+                    }),
+                    _ => Err("SIMILARITY query must be a string literal".into()),
+                },
+                _ => Err("SIMILARITY requires (column, 'query')".into()),
+            }
+        }
         _ => Err(format!("Unsupported SQL expression: {}", sql).into()),
     }
 }

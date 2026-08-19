@@ -1,0 +1,6 @@
+id,question,answer,topic
+1,What is RAII?,RAII binds resource lifetime to object lifetime.,memory
+2,How is ownership moved without copying?,Move semantics transfer ownership of resources without copying.,memory
+3,What is a move constructor?,A move constructor transfers resources from another object.,cpp
+4,What is a virtual function?,A virtual function enables runtime polymorphism.,cpp
+5,What is a mutex?,A mutex provides mutual exclusion for concurrent access.,concurrency
