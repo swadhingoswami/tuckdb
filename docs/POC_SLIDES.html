@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TuckDB-AI | Vector DB Lifecycle POC</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#161b26; --panel2:#1c2333; --txt:#e6e9f0; --dim:#8b93a7;
+    --accent:#4f8cff; --green:#37d399; --amber:#ffb454; --red:#ff6b6b; --line:#2a3247;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{background:var(--bg); color:var(--txt); font:17px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; overflow:hidden;}
+  .deck{height:100%;}
+  .slide{position:absolute; inset:0; display:none; flex-direction:column; padding:48px 64px; overflow:auto;}
+  .slide.active{display:flex;}
+  .kicker{color:var(--accent); font-weight:700; letter-spacing:.08em; text-transform:uppercase; font-size:13px; margin-bottom:10px;}
+  h1{font-size:44px; margin-bottom:8px;}
+  h2{font-size:28px; margin-bottom:16px;}
+  .sub{color:var(--dim); font-size:18px; margin-bottom:24px;}
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-bottom:20px;}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px;}
+  .card .v{font-size:34px; font-weight:700; color:var(--green);}
+  .card .l{color:var(--dim); font-size:13px; text-transform:uppercase; letter-spacing:.05em; margin-top:6px;}
+  .code{background:#0a0d13; border:1px solid var(--line); border-radius:10px; padding:16px 18px; font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre; overflow:auto; color:#c9d4ee; margin-bottom:16px;}
+  .code .ok{color:var(--green);} .code .am{color:var(--amber);} .code .b{color:var(--accent);}
+  .note{color:var(--dim); font-size:15px;}
+  .nav{position:fixed; bottom:18px; left:0; right:0; display:flex; justify-content:center; gap:8px; z-index:5;}
+  .nav button{background:var(--panel2); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:8px 16px; cursor:pointer; font-size:14px;}
+  .nav button:hover{background:#243050;}
+  .dots{position:fixed; top:18px; right:24px; display:flex; gap:8px; z-index:5;}
+  .dot{width:10px; height:10px; border-radius:50%; background:var(--line);}
+  .dot.on{background:var(--accent);}
+  .bar{height:4px; background:var(--accent); width:0; position:fixed; top:0; left:0; z-index:6; transition:width .3s;}
+  .tag{display:inline-block; background:var(--panel2); border:1px solid var(--line); border-radius:20px; padding:4px 12px; font-size:13px; color:var(--dim); margin-right:8px;}
+  .row{display:flex; flex-wrap:wrap; gap:16px; align-items:center;}
+  .big{font-size:64px; font-weight:800;}
+  .g{color:var(--green);} .a{color:var(--amber);} .r{color:var(--red);} .ac{color:var(--accent);}
+  .center{text-align:center; justify-content:center;}
+</style>
+</head>
+<body>
+<div class="bar" id="bar"></div>
+<div class="dots" id="dots"></div>
+<div class="deck" id="deck">
+
+  <!-- 1. TITLE -->
+  <section class="slide active center" data-title="Title">
+    <div style="max-width:900px;">
+      <div class="kicker" style="font-size:16px;">Proof of Concept — live, real output</div>
+      <h1 style="font-size:54px;">TuckDB-AI<br>Vector DB Lifecycle Management</h1>
+      <p class="sub" style="font-size:22px;">A real file → chunk → embed → vector DB → query → incremental update / delete</p>
+      <p class="sub" style="margin-top:18px;">
+        <span class="tag">real file</span><span class="tag">11 chunks</span><span class="tag">insert 0.22 ms</span><span class="tag">update 1/11 chunks</span><span class="tag">90.9% work avoided</span>
+      </p>
+      <p class="sub" style="margin-top:26px;">“Process what changed. Leave everything else untouched.”</p>
+      <p class="note" style="margin-top:30px;">Press <b>→</b> or click Next. Run it: <span class="code" style="display:inline; padding:4px 10px;">cargo run --release --example poc_demo</span></p>
+    </div>
+  </section>
+
+  <!-- 2. STEP 1 -->
+  <section class="slide" data-title="1 · Take a real file">
+    <div class="kicker">Step 1</div>
+    <h2>Take a real file</h2>
+    <div class="grid">
+      <div class="card"><div class="v">demo_cpp.txt</div><div class="l">file</div></div>
+      <div class="card"><div class="v">3,020</div><div class="l">bytes</div></div>
+      <div class="card"><div class="v">11</div><div class="l">paragraphs</div></div>
+      <div class="card"><div class="v">11</div><div class="l">chunks (1 paragraph = 1 chunk)</div></div>
+    </div>
+    <div class="code"><span class="b">[1]</span> Take a real file
+    file: <span class="am">data/demo_cpp.txt</span> (3020 bytes, 11 paragraphs)</div>
+    <p class="note">Real C++ prose: smart pointers, RAII, move semantics, containers, lambdas, templates, virtual functions, concurrency, exceptions — not placeholder text.</p>
+  </section>
+
+  <!-- 3. STEP 2 -->
+  <section class="slide" data-title="2 · Upload into the vector DB">
+    <div class="kicker">Step 2</div>
+    <h2>Upload into the TuckDB vector DB</h2>
+    <p class="sub">The file is chunked, every chunk is embedded, and the vectors are stored.</p>
+    <div class="code"><span class="b">[2]</span> Upload it into the TuckDB vector DB (chunk -&gt; embed -&gt; store)
+    chunks created: <span class="ok">11</span>
+      chunk  0: hash 183278e58282d9be  "<span class="am"># A Practical C++ Guide</span>"...
+      chunk  1: hash 27e5d358b965ca52  "<span class="am">Ownership of dynamically allocated memory</span>"...
+      chunk  2: hash 6e618ad1a209c68d  "<span class="am">Resource Acquisition Is Initialization</span>"...
+      chunk  3: hash 1ffaccd91f608c3e  "<span class="am">Move semantics avoid expensive deep copies</span>"...
+      chunk  4: hash e6b251b9800c3903  "<span class="am">The standard library provides containers</span>"...
+      chunk  5: hash 11713cde435c44e9  "<span class="am">Lambdas let you write small functions</span>"...
+      chunk  6: hash 85601327bd43dfa4  "<span class="am">Templates provide compile time polymorph</span>"...
+      chunk  7: hash b3f2c528a4c1c4ca  "<span class="am">Virtual functions provide runtime polymorph</span>"...
+      chunk  8: hash c770ff331a995730  "<span class="am">Concurrency is supported by std::thread</span>"...
+      chunk  9: hash 20376d86cab5bf62  "<span class="am">Exception safety is governed by the guaran</span>"...
+      chunk 10: hash 07b8b6382d2d51d5  "<span class="am">Good C++ code favors value semantics</span>"...</div>
+    <p class="note">Each chunk gets a deterministic content hash — that hash is what makes later “did this chunk change?” checks possible.</p>
+  </section>
+
+  <!-- 4. STEP 3 -->
+  <section class="slide" data-title="3 · Count + timing benchmark">
+    <div class="kicker">Step 3</div>
+    <h2>Count + timing benchmark (insert)</h2>
+    <div class="grid">
+      <div class="card"><div class="v">11</div><div class="l">chunks created</div></div>
+      <div class="card"><div class="v">11</div><div class="l">embeddings generated</div></div>
+      <div class="card"><div class="v">11</div><div class="l">vectors stored</div></div>
+      <div class="card"><div class="v">0.22 ms</div><div class="l">insert time (222 µs)</div></div>
+    </div>
+    <div class="code"><span class="b">[3]</span> Count + timing benchmark (insert)
+    chunks:                 11
+    embeddings generated:   11
+    vectors stored:         11
+    insert time:            <span class="ok">222 us (0.22 ms)</span></div>
+    <p class="note">Full pipeline measured on a real file: read → chunk → embed 11 chunks → store 11 vectors.</p>
+  </section>
+
+  <!-- 5. STEP 4 -->
+  <section class="slide" data-title="4 · Query the file">
+    <div class="kicker">Step 4</div>
+    <h2>Query related info from the uploaded file</h2>
+    <div class="code"><span class="b">[4]</span> Query related info from the uploaded file
+    Q: "How do I manage ownership of dynamically allocated memory?"
+      -&gt; <span class="ok">chunk 1</span> score=0.437 "<span class="am">Ownership of dynamically allocated memory is best expressed with smart pointers...</span>"
+    Q: "What happens when an object goes out of scope?"
+      -&gt; <span class="ok">chunk 2</span> score=0.296 "<span class="am">Resource Acquisition Is Initialization, RAII, means the lifetime of a resource...</span>"
+    Q: "What is runtime polymorphism?"
+      -&gt; <span class="ok">chunk 7</span> score=0.540 "<span class="am">Virtual functions provide runtime polymorphism through the vtable...</span>"</div>
+    <p class="note">The question is embedded, compared to every stored vector (cosine), and the best chunk is returned — each question hits exactly the right paragraph.</p>
+  </section>
+
+  <!-- 6. STEP 5 -->
+  <section class="slide" data-title="5 · Add another file (incremental)">
+    <div class="kicker">Step 5 · incremental</div>
+    <h2>Add an extra file — only the NEW file is processed</h2>
+    <div class="grid">
+      <div class="card"><div class="v">+381</div><div class="l">new chunks (README.md)</div></div>
+      <div class="card"><div class="v">11 → 392</div><div class="l">vectors</div></div>
+      <div class="card"><div class="v">3 ms</div><div class="l">add time</div></div>
+      <div class="card"><div class="v g">untouched</div><div class="l">existing doc 0 vectors</div></div>
+    </div>
+    <div class="code"><span class="b">[5]</span> Add an extra file (incremental: only the NEW file is processed)
+    add <span class="am">README.md</span>: +381 chunks (11 -&gt; 392 vectors) in <span class="ok">3 ms</span>
+    existing doc 0 vectors untouched: <span class="ok">true</span></div>
+    <p class="note">Adding a file never re-processes the 11 existing vectors — only the 381 new chunks are embedded.</p>
+  </section>
+
+  <!-- 7. STEP 5b -->
+  <section class="slide" data-title="5b · Update 1 chunk (hero)">
+    <div class="kicker">Step 5b · the hero</div>
+    <h2>Update the file — edit 1 paragraph → only 1 chunk re-embedded</h2>
+    <div class="grid">
+      <div class="card"><div class="v a">1</div><div class="l">changed chunks</div></div>
+      <div class="card"><div class="v a">1</div><div class="l">embeddings regenerated</div></div>
+      <div class="card"><div class="v g">10</div><div class="l">chunks skipped</div></div>
+      <div class="card"><div class="v g">90.9%</div><div class="l">work avoided</div></div>
+    </div>
+    <div class="code"><span class="b">[5b]</span> Update doc 0 (edit 1 paragraph -&gt; only 1 chunk re-embedded)
+    update: <span class="a">changed = 1</span>, <span class="a">re-embedded = 1</span>, <span class="g">skipped = 10</span> (<span class="g">90.9% avoided</span>) in 0 ms
+    vector count unchanged: 392 -&gt; 392</div>
+    <p class="note">A naive vector DB would re-embed all 11 chunks. Here the engine hashes each chunk, compares with stored hashes, and re-embeds <b>only the 1 that changed</b>.</p>
+  </section>
+
+  <!-- 8. STEP 5c -->
+  <section class="slide" data-title="5c · Delete (old data removed)">
+    <div class="kicker">Step 5c · delete</div>
+    <h2>Delete the extra file — old data removed, only its vectors</h2>
+    <div class="grid">
+      <div class="card"><div class="v r">381</div><div class="l">vectors removed</div></div>
+      <div class="card"><div class="v">392 → 11</div><div class="l">vectors</div></div>
+      <div class="card"><div class="v">0 ms</div><div class="l">delete time</div></div>
+      <div class="card"><div class="v g">true</div><div class="l">doc 0 still searchable</div></div>
+    </div>
+    <div class="code"><span class="b">[5c]</span> Delete the extra file (old data removed, only its vectors)
+    delete: <span class="r">381 vectors removed</span> (392 -&gt; 11) in <span class="ok">0 ms</span>; doc 0 still searchable: <span class="ok">true</span></div>
+    <p class="note">Deletion is O(chunks in the document), not a scan of all 392 vectors — unrelated data is untouched.</p>
+  </section>
+
+  <!-- 9. SUMMARY -->
+  <section class="slide center" data-title="What this proves">
+    <div style="max-width:960px;">
+      <div class="kicker">Summary</div>
+      <h2>What this proves</h2>
+      <div class="grid" style="margin-top:10px;">
+        <div class="card"><div class="v">11</div><div class="l">chunks · 1 file · 0.22 ms</div></div>
+        <div class="card"><div class="v g">1</div><div class="l">re-embedded when 1 chunk changes</div></div>
+        <div class="card"><div class="v g">90.9%</div><div class="l">work avoided on a single edit</div></div>
+        <div class="card"><div class="v g">99.8%</div><div class="l">work avoided at 500k chunks / 1k changed</div></div>
+      </div>
+      <div class="code" style="text-align:left;">1 of 11 chunks changed
+Naive:           11 embeddings
+Lifecycle-aware: 1 embedding   + 10 skipped
+
+Scaling: 500,000 chunks, 1,000 changed
+Naive:           500,000 embeddings
+Lifecycle-aware: 1,000 embeddings  = 99.8% avoided</div>
+      <p class="sub" style="margin-top:8px;">Reproduce everything:<br>
+        <span class="code" style="display:inline-block; padding:4px 10px;">cargo run --release --example poc_demo</span>
+        &nbsp;·&nbsp; <span class="code" style="display:inline-block; padding:4px 10px;">./scripts/e2e_demo.sh</span>
+        &nbsp;·&nbsp; <span class="code" style="display:inline-block; padding:4px 10px;">cargo run --release --example benchmark_report</span></p>
+    </div>
+  </section>
+
+</div>
+
+<div class="nav">
+  <button onclick="prev()">◀ Prev</button>
+  <button onclick="next()">Next ▶</button>
+  <button onclick="toggleAuto()">⏵ Auto</button>
+</div>
+
+<script>
+  const slides = [...document.querySelectorAll('.slide')];
+  const dotsBox = document.getElementById('dots');
+  let cur = 0, auto = false, timer = null;
+  slides.forEach((_, i) => { const d = document.createElement('div'); d.className='dot'; dotsBox.appendChild(d); });
+  const dots = [...dotsBox.children];
+
+  function show(i){
+    cur = Math.max(0, Math.min(slides.length-1, i));
+    slides.forEach((s, idx) => s.classList.toggle('active', idx===cur));
+    dots.forEach((d, idx) => d.classList.toggle('on', idx===cur));
+    document.getElementById('bar').style.width = ((cur+1)/slides.length*100)+'%';
+  }
+  function next(){ show(cur+1); }
+  function prev(){ show(cur-1); }
+  function toggleAuto(){
+    auto = !auto;
+    if(auto){ timer = setInterval(next, 6000); }
+    else { clearInterval(timer); }
+  }
+  document.addEventListener('keydown', e => {
+    if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){ next(); }
+    if(e.key==='ArrowLeft'||e.key==='PageUp'){ prev(); }
+  });
+  show(0);
+</script>
+</body>
+</html>

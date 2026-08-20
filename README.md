@@ -318,6 +318,7 @@ cargo run --example semantic_dedup_demo     # paraphrase candidates (report only
 cargo run --example model_migration_demo    # v1 → v2 incremental migration
 cargo run --example file_index_demo         # real files → chunks → vector DB → queries
 cargo run --example unified_demo            # SQL routing: vector DB vs .tuck
+cargo run --release --example poc_demo      # 5-step POC with chunk counts + timing benchmarks
 ```
 
 See **[docs/VECTOR_DB.md](docs/VECTOR_DB.md)** for the deep dive (flow diagrams,

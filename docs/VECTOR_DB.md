@@ -211,10 +211,15 @@ Other public pieces: `LifecycleManager`, `ChunkTracker`, `ContentDedup`,
 cargo test                                  # correctness
 cargo run --release --example showcase      # full live demo
 cargo run --release --example benchmark_report
+cargo run --release --example poc_demo      # 5-step POC with chunk counts + timing
 cargo run --example file_index_demo -- --file data/demo_cpp.txt
 cargo run --example unified_demo -- --csv data/cpp_questions.csv
 ./scripts/e2e_demo.sh                       # full end-to-end demo with real output
 ```
+
+> 🎞️ **Slides (one per step, with real output):** open `docs/POC_SLIDES.html` in a
+> browser (arrow keys to navigate, ⏵ Auto to auto-advance — screen-record it for a
+> short video).
 
 Sample data lives in `data/`. Point the demos at your own `.txt`, `.md`, `.pdb`, or `.csv`.
 
