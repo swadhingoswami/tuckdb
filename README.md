@@ -1,4 +1,4 @@
-<img width="1376" height="768" alt="Gemini_Generated_Image_ehre03ehre03ehre" src="https://github.com/user-attachments/assets/44d6b0ec-0164-43b8-820a-edb6f46ec6c7" />
+<img width="1376" height="768" alt="image" src="https://github.com/user-attachments/assets/beb79905-6d75-4bff-b387-576d3c92cacd" />
 <img width="2048" height="1920" alt="licensed-image_1" src="https://github.com/user-attachments/assets/4cef399a-392a-4baa-9557-b0945d80db07" />
 
 <p align="center">
@@ -107,7 +107,7 @@ File size: 644 bytes
 ```
 
 ---
-
+<img width="1408" height="768" alt="image" src="https://github.com/user-attachments/assets/d69e1ab2-1013-4c04-a2be-657f735fe70f" />
 ## 🤖 TuckDB-AI — Incremental AI Data Engine
 
 > **A small change in AI data can trigger expensive reprocessing of large datasets.**
